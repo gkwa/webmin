@@ -14,3 +14,6 @@ desc_ru.UTF-8=Настройки QMail
 desc_cz.UTF-8=Konfigurace QMail
 desc_nl=QMail Email Server
 desc_no=QMail e-post tjener
+desc_hu=MTA szerver (QMail)
+longdesc_ms_MY=Mengkonfigurasi pelayan mel QMail, alternatif yang lebih mudah berbanding Sendmail.
+desc_ms_MY=Pelayan Mail QMail

@@ -105,7 +105,7 @@ if (&use_ifup_command($a)) {
 			}
 	        else { $cmd .= "ifdown $a->{'physical'}" . "." . $a->{'vlanid'}; }
 	}
-        elsif ($a->{'up'}) { $cmd .= "ifup $a->{'fullname'}"; }
+        elsif ($a->{'up'}) { $cmd .= "ifdown $a->{'fullname'}\; ifup $a->{'fullname'}"; }
         else { $cmd .= "ifdown $a->{'fullname'}"; }
 	}
 else {
@@ -520,7 +520,7 @@ if ($gconfig{'os_type'} eq 'debian-linux' && defined(&get_interface_defs)) {
 	local @ifaces = &get_interface_defs();
 	local @dnssearch;
 	if (@{$_[0]->{'domain'}} > 1) {
-		@dnssearch = map { [ 'dns-search', $_ ] } @{$_[0]->{'domain'}};
+		@dnssearch = ( [ 'dns-domain', join(" ", @{$_[0]->{'domain'}}) ] );
 		}
 	elsif (@{$_[0]->{'domain'}}) {
 		@dnssearch = ( [ 'dns-domain', $_[0]->{'domain'}->[0] ] );

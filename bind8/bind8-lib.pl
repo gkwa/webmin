@@ -25,7 +25,7 @@ $zone_names_version = 3;
 
 # Where to find root zones file
 $internic_ftp_host = "rs.internic.net";
-$internic_ftp_ip = "198.41.0.6";
+$internic_ftp_ip = "199.7.52.73";
 $internic_ftp_file = "/domain/named.root";
 $internic_ftp_gzip = "/domain/root.zone.gz";
 
@@ -1188,11 +1188,9 @@ $rv .= &ui_columns_start([ "", $text{'index_zone'}, $text{'index_type'} ],
 for($i=0; $i<@{$_[0]}; $i++) {
 	local @cols;
 	if (&have_dnssec_tools_support()) {
-		@cols = ( "<a href=\"$_[0]->[$i]\">$_[1]->[$i]</a>",
-			$_[2]->[$i], $_[4]->[$i]);
+		@cols = ( &ui_link($_[0]->[$i], $_[1]->[$i]), $_[2]->[$i], $_[4]->[$i] );
 	} else {
-		@cols = ( "<a href=\"$_[0]->[$i]\">$_[1]->[$i]</a>",
-			$_[2]->[$i]);
+		@cols = ( &ui_link($_[0]->[$i], $_[1]->[$i]), $_[2]->[$i] );
 	}
 	if (defined($_[3]->[$i])) {
 		$rv .= &ui_checked_columns_row(\@cols, \@tds, "d", $_[3]->[$i]);
@@ -1203,18 +1201,6 @@ for($i=0; $i<@{$_[0]}; $i++) {
 	}
 $rv .= &ui_columns_end();
 return $rv;
-}
-
-# convert_illegal(text)
-# Convert text containing special HTML characters to properly display it.
-sub convert_illegal
-{
-$_[0] =~ s/&/&amp;/g;
-$_[0] =~ s/>/&gt;/g;
-$_[0] =~ s/</&lt;/g;
-$_[0] =~ s/"/&quot;/g;
-$_[0] =~ s/ /&nbsp;/g;
-return $_[0];
 }
 
 sub check_net_ip
@@ -1462,13 +1448,8 @@ if (!defined($get_chroot_cache)) {
 			}
 		}
 	if (!defined($get_chroot_cache)) {
+		# Use manually set path
 		$get_chroot_cache = $config{'chroot'};
-		if ($gconfig{'real_os_type'} eq 'CentOS Linux' &&
-		    $gconfig{'real_os_version'} >= 6 &&
-		    $get_chroot_cache eq "/var/named/chroot") {
-			# On CentOS 6.x, no chroot is needed
-			$get_chroot_cache = undef;
-			}
 		}
 	}
 return $get_chroot_cache;
@@ -1623,12 +1604,16 @@ local @mips = &unique($_[1], @{$_[4]});
 local $masters = { 'name' => 'masters',
                    'type' => 1,
                    'members' => [ map { { 'name' => $_ } } @mips ] };
+local $allow = { 'name' => 'allow-transfer',
+                 'type' => 1,
+                 'members' => [ map { { 'name' => $_ } } @mips ] };
 local $dir = { 'name' => 'zone',
                'values' => [ $_[0] ],
                'type' => 1,
                'members' => [ { 'name' => 'type',
                                 'values' => [ 'slave' ] },
-                                $masters
+                                $masters,
+				$allow,
                             ]
 	     };
 local $base = $config{'slave_dir'} || &base_directory();
@@ -2207,6 +2192,7 @@ foreach $k (keys %znc) {
 	}
 if ($changed || !$filecount || $znc{'version'} != $zone_names_version ||
     !$donefile{$config{'named_conf'}} ||
+    $config{'no_chroot'} != $znc{'no_chroot_config'} ||
     $config{'pid_file'} ne $znc{'pidfile_config'}) {
 	# Yes .. need to rebuild
 	%znc = ( );
@@ -2238,6 +2224,7 @@ if ($changed || !$filecount || $znc{'version'} != $zone_names_version ||
 	$znc{'base'} = &base_directory($conf, 1);
 	$znc{'pidfile'} = &get_pid_file(1);
 	$znc{'pidfile_config'} = $config{'pid_file'};
+	$znc{'no_chroot_config'} = $config{'no_chroot'};
 
 	# Store source files
 	foreach $f (keys %files) {
@@ -2783,7 +2770,10 @@ local $rndc_args = $_[1] || $_[0];
 local $out;
 if (&has_ndc() == 2) {
 	# Try with rndc
-	$out = &backquote_logged("$config{'rndc_cmd'} -c $config{'rndc_conf'} $rndc_args 2>&1 </dev/null");
+	$out = &backquote_logged(
+		$config{'rndc_cmd'}.
+		($config{'rndc_conf'} ? " -c $config{'rndc_conf'}" : "").
+		" ".$rndc_args." 2>&1 </dev/null");
 	}
 if (&has_ndc() != 2 || $out =~ /connect\s+failed/i) {
 	if (&has_ndc(2)) {
@@ -2901,6 +2891,7 @@ my ($file) = @_;
 my $rootfile = &make_chroot($file);
 my $ftperr;
 my $temp;
+# First try by hostname
 &ftp_download($internic_ftp_host, $internic_ftp_file, $rootfile, \$ftperr);
 if ($ftperr) {
 	# Try IP address directly
@@ -2942,26 +2933,23 @@ if (!$access{'ro'} && $access{'apply'}) {
 	if (&is_bind_running()) {
 		if ($zone && ($access{'apply'} == 1 || $access{'apply'} == 2)) {
 			# Apply this zone
-			push(@rv, "<a href='restart_zone.cgi?return=$r&".
-				  "view=$zone->{'viewindex'}&".
-				  "zone=$zone->{'name'}'>".
-				  "$text{'links_apply'}</a>");
+            my $link = "restart_zone.cgi?return=$r&".
+                        "view=$zone->{'viewindex'}&".
+                        "zone=$zone->{'name'}";
+			push(@rv, &ui_link($link, $text{'links_apply'}) );
 			}
 		# Apply whole config
 		if ($access{'apply'} == 1 || $access{'apply'} == 3) {
-			push(@rv, "<a href='restart.cgi?return=$r'>".
-				  "$text{'links_restart'}</a>");
+			push(@rv, &ui_link("restart.cgi?return=$r", $text{'links_restart'}) );
 			}
 		if ($access{'apply'} == 1) {
 			# Stop BIND
-			push(@rv, "<a href='stop.cgi?return=$r'>".
-				  "$text{'links_stop'}</a>");
+			push(@rv, &ui_link("stop.cgi?return=$r", $text{'links_stop'}) );
 			}
 		}
 	elsif ($access{'apply'} == 1) {
 		# Start BIND
-		push(@rv, "<a href='start.cgi?return=$r'>".
-			  "$text{'links_start'}</a>");
+		push(@rv, &ui_link("start.cgi?return=$r", $text{'links_start'}));
 		}
 	}
 return join('<br>', @rv);
@@ -2990,7 +2978,8 @@ return $bind_version >= 9.4 ? 2 :
 sub dnssec_size_range
 {
 local ($alg) = @_;
-return $alg eq 'RSAMD5' || $alg eq 'RSASHA1' ? ( 512, 2048 ) :
+return $alg eq 'RSAMD5' || $alg eq 'RSASHA1' ||
+	$alg eq 'RSASHA256' ? ( 512, 2048 ) :
        $alg eq 'DH' ? ( 128, 4096 ) :
        $alg eq 'DSA' ? ( 512, 1024, 64 ) :
        $alg eq 'HMAC-MD5' ? ( 1, 512 ) :
@@ -3000,7 +2989,7 @@ return $alg eq 'RSAMD5' || $alg eq 'RSASHA1' ? ( 512, 2048 ) :
 
 sub list_dnssec_algorithms
 {
-return ("RSASHA1", "RSAMD5", "DSA", "DH", "HMAC-MD5",
+return ("RSASHA1", "RSASHA256", "RSAMD5", "DSA", "DH", "HMAC-MD5",
 	"NSEC3RSASHA1", "NSEC3DSA");
 }
 
@@ -3321,7 +3310,7 @@ if (&check_if_dnssec_tools_managed($dom)) {
 	&unlock_file(&make_chroot($zonefile));
 	&error($err) if ($err);
 	return undef;
-}
+	}
 
 local $keyrec = &get_dnskey_record($z, $recs);
 if ($keyrec) {
@@ -3900,6 +3889,27 @@ sub dt_delete_dnssec_state
 	}
 
 	return undef;
+}
+
+# get_ds_record(&zone|&zone-name)
+# Returns the text of a DS record for this zone
+sub get_ds_record
+{
+my ($zone) = @_;
+my $zonefile;
+if ($zone->{'values'}) {
+	# Zone object
+	local $f = &find("file", $zone->{'members'});
+	$zonefile = $f->{'values'}->[0];
+	}
+else {
+	# Zone name object
+	$zonefile = $zone->{'file'};
+	}
+my $out = &backquote_command("dnssec-dsfromkey -f ".quotemeta(&make_chroot(&absolute_path($zonefile)))." ZONE 2>/dev/null");
+return undef if ($?);
+$out =~ s/\r|\n//g;
+return $out;
 }
 
 1;

@@ -198,6 +198,10 @@ if (open(PARTS, "/proc/partitions")) {
 			# PV disk from Xen
 			push(@devs, "/dev/$1");
 			}
+		elsif (/\d+\s+\d+\s+\d+\s+(mmcblk\d+)\s/) {
+			# SD card / MMC, seen on Raspberry Pi
+			push(@devs, "/dev/$1");
+			}
 		}
 	close(PARTS);
 
@@ -292,6 +296,11 @@ while(<FDISK>) {
 		elsif ($disk->{'device'} =~ /\/xvd([a-z]+)$/) {
 			# Xen virtual disk
 			$disk->{'desc'} = &text('select_device', 'Xen', uc($1));
+			$disk->{'type'} = 'ide';
+			}
+		elsif ($disk->{'device'} =~ /\/mmcblk([0-9]+)$/) {
+			# SD-card / MMC
+			$disk->{'desc'} = &text('select_device', 'SD-Card', $1);
 			$disk->{'type'} = 'ide';
 			}
 		elsif ($disk->{'device'} =~ /\/vd([a-z]+)$/) {
@@ -580,7 +589,7 @@ return @disks;
 }
 
 # partition_description(device)
-# Converts a device path like /dev/hda into a human-readable name
+# Converts a device path like /dev/hda1 into a human-readable name
 sub partition_description
 {
 my ($device) = @_;
@@ -588,6 +597,8 @@ return $device =~ /(s|h|xv|v)d([a-z]+)(\d+)$/ ?
 	 &text('select_part', $1 eq 's' ? 'SCSI' :
 			      $1 eq 'xv' ? 'Xen' :
 			      $1 eq 'v' ? 'VirtIO' : 'IDE', uc($2), "$3") :
+       $device =~ /mmcblk(\d+)p(\d+)$/ ?
+	 &text('select_part', 'SD-Card', "$1", "$2") :
        $device =~ /scsi\/host(\d+)\/bus(\d+)\/target(\d+)\/lun(\d+)\/part(\d+)/ ?
 	 &text('select_spart', "$1", "$2", "$3", "$4", "$5") :
        $device =~ /ide\/host(\d+)\/bus(\d+)\/target(\d+)\/lun(\d+)\/part(\d+)/ ?
@@ -632,12 +643,13 @@ else {
 # Changes the type of an existing partition
 sub change_type
 {
-&open_fdisk("$_[0]");
+my ($disk, $part, $type) = @_;
+&open_fdisk($disk);
 &wprint("t\n");
 local $rv = &wait_for($fh, 'Partition.*:', 'Selected partition');
-&wprint("$_[1]\n") if ($rv == 0);
+&wprint("$part\n") if ($rv == 0);
 &wait_for($fh, 'Hex.*:');
-&wprint("$_[2]\n");
+&wprint("$type\n");
 &wait_for($fh, 'Command.*:');
 &wprint("w\n"); sleep(1);
 &close_fdisk();
@@ -682,12 +694,12 @@ if ($has_parted) {
 	my $pe = $part > 4 ? "logical" : "primary";
 	my $cmd;
 	if ($type eq "raid") {
-		$cmd = "parted -s ".$disk." unit cyl mkpartfs ".$pe." ".
+		$cmd = "parted -s ".$disk." unit cyl mkpart ".$pe." ".
 		       "ext2 ".($start-1)." ".$end;
 		$cmd .= " ; parted -s ".$disk." set $part raid on";
 		}
 	elsif ($type && $type ne 'ext2') {
-		$cmd = "parted -s ".$disk." unit cyl mkpartfs ".$pe." ".
+		$cmd = "parted -s ".$disk." unit cyl mkpart ".$pe." ".
 		       $type." ".($start-1)." ".$end;
 		}
 	else {
@@ -715,16 +727,22 @@ else {
 		}
 	&wait_for($fh, 'First.*:') if ($wf != 1);
 	&wprint("$start\n");
-	&wait_for($fh, 'Last.*:');
+	$wf = &wait_for($fh, 'Last.*:', 'First.*:');
+	$wf < 0 && &error("End of input waiting for first cylinder response");
+	$wf == 1 && &error("First cylinder is invalid : $wait_for_input");
 	&wprint("$end\n");
-	&wait_for($fh, 'Command.*:');
+	$wf = &wait_for($fh, 'Command.*:', 'Last.*:');
+	$wf < 0 && &error("End of input waiting for last cylinder response");
+	$wf == 1 && &error("Last cylinder is invalid : $wait_for_input");
 
 	&wprint("t\n");
 	local $rv = &wait_for($fh, 'Partition.*:', 'Selected partition');
 	&wprint("$part\n") if ($rv == 0);
 	&wait_for($fh, 'Hex.*:');
 	&wprint("$type\n");
-	&wait_for($fh, 'Command.*:');
+	$wf = &wait_for($fh, 'Command.*:', 'Hex.*:');
+	$wf < 0 && &error("End of input waiting for partition type response");
+	$wf == 1 && &error("Partition type is invalid : $wait_for_input");
 	&wprint("w\n");
 	&wait_for($fh, 'Syncing'); sleep(3);
 	&close_fdisk();
@@ -1340,7 +1358,15 @@ else {
 sub open_fdisk
 {
 local $fpath = &check_fdisk();
-($fh, $fpid) = &foreign_call("proc", "pty_process_exec", join(" ",$fpath, @_));
+my $cylarg;
+if ($fpath =~ /\/fdisk/) {
+	my $out = &backquote_command("$fpath -h 2>&1 </dev/null");
+	if ($out =~ /-u\s+<size>/) {
+		$cylarg = "-u=cylinders";
+		}
+	}
+($fh, $fpid) = &foreign_call("proc", "pty_process_exec",
+			     join(" ", $fpath, $cylarg, @_));
 }
 
 sub open_sfdisk

@@ -99,8 +99,13 @@ if ($level == 0) {
 			my $emsg;
 			if ($t->{'errors'}) {
 				$emsg .= " (<font color=red>".
-					 &text('right_driveerr', $t->{'errors'}).
-					 "</font>)";
+				    &text('right_driveerr', $t->{'errors'}).
+				    "</font>)";
+				}
+			elsif ($t->{'failed'}) {
+				$emsg .= " (<font color=red>".
+				    $text{'right_drivefailed'}.
+				    "</font>)";
 				}
 			push(@temps, $short.": ".$t->{'temp'}."&#8451;".$emsg);
 			}
@@ -156,12 +161,31 @@ if ($level == 0) {
 	# Memory usage
 	if ($info->{'mem'}) {
 		@m = @{$info->{'mem'}};
-		if (@m && $m[0]) {
-			print &ui_table_row($text{'right_real'},
-				&text('right_used',
+		if (@m && $m[0] && $m[5]) {
+			# Show memory usage with bursting
+			$real = &text('right_used2',
+				      &nice_size($m[0]*1024),
+				      &nice_size(($m[0]-$m[1])*1024),
+				      &nice_size($m[5]*1024))."<br>\n".
+				&bar_chart_three($m[5], $m[1], $m[0]-$m[1],
+						 $m[5]-$m[0]);
+			}
+		elsif (@m && $m[0] && !$m[5]) {
+			# Show memory usage on a regular system
+			$real = &text('right_used',
 				      &nice_size($m[0]*1024),
 				      &nice_size(($m[0]-$m[1])*1024))."<br>\n".
-				&bar_chart($m[0], $m[0]-$m[1], 1));
+				&bar_chart($m[0], $m[0]-$m[1], 1);
+			}
+		else {
+			# No memory info available
+			$real = undef;
+			}
+		if ($real) {
+			if (&foreign_available("proc")) {
+				$real = "<a href=proc/index_size.cgi>$real</a>";
+				}
+			print &ui_table_row($text{'right_real'}, $real);
 			}
 
 		if (@m && $m[2]) {
@@ -209,7 +233,7 @@ if ($level == 0) {
 
 	print &ui_table_end();
 
-	# Check for incorrect OS
+	# Show other webmin-generated notifications
 	if (&foreign_check("webmin")) {
 		&foreign_require("webmin", "webmin-lib.pl");
 		&webmin::show_webmin_notifications();

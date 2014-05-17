@@ -4,10 +4,16 @@
 use strict;
 use warnings;
 require './minecraft-lib.pl';
-our (%in, %text, %config, $module_name);
+our (%in, %text, %config, $module_name, $module_root_directory);
 
 &ui_print_header(undef, $text{'index_title'}, "", undef, 1, 1, 0,
 		 &help_search_link("minecraft", "google"));
+
+# Check for sane root dir
+if ($config{'minecraft_dir'} eq $module_root_directory) {
+	&ui_print_endpage(&text('index_rooterr', $module_root_directory,
+			  "../config.cgi?$module_name"));
+	}
 
 my $err = &check_minecraft_server();
 if ($err && &is_minecraft_port_in_use()) {
@@ -57,17 +63,17 @@ my @links = ( "edit_conf.cgi", "edit_users.cgi",
 	      "view_logs.cgi", "list_conns.cgi",
 	      "list_worlds.cgi", "edit_cmds.cgi",
 	      "console.cgi", "edit_backup.cgi",
-	      "edit_manual.cgi" );
+	      "list_playtime.cgi", "edit_manual.cgi" );
 my @titles = ( $text{'conf_title'}, $text{'users_title'},
 	       $text{'logs_title'}, $text{'conns_title'},
 	       $text{'worlds_title'}, $text{'cmds_title'},
 	       $text{'console_title'}, $text{'backup_title'},
-	       $text{'manual_title'} );
+	       $text{'playtime_title'}, $text{'manual_title'} );
 my @icons = ( "images/conf.gif", "images/users.gif",
 	      "images/logs.gif", "images/conns.gif",
 	      "images/worlds.gif", "images/cmds.gif",
 	      "images/console.gif", "images/backup.gif",
-	      "images/manual.gif" );
+	      "images/playtime.gif", "images/manual.gif" );
 &icons_table(\@links, \@titles, \@icons, 5);
 
 print &ui_hr();

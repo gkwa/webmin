@@ -6,6 +6,8 @@
 # Find install directory
 LANG=
 export LANG
+LANGUAGE=
+export LANGUAGE
 cd `dirname $0`
 if [ -x /bin/pwd ]; then
 	wadir=`/bin/pwd`
@@ -280,10 +282,10 @@ else
 		echo ""
 		exit 6
 	fi
-	$perl -e 'exit ($] < 5.002 ? 1 : 0)'
+	$perl -e 'exit ($] < 5.008 ? 1 : 0)'
 	if [ $? = "1" ]; then
 		echo "ERROR: Detected old perl version. Webmin requires"
-		echo "perl 5.002 or better to run"
+		echo "perl 5.8 or better to run"
 		echo ""
 		exit 7
 	fi
@@ -631,19 +633,7 @@ if [ "$upgrading" != 1 ]; then
 	echo "os_version=$os_version" >> $config_dir/config
 	echo "real_os_type=$real_os_type" >> $config_dir/config
 	echo "real_os_version=$real_os_version" >> $config_dir/config
-	if [ -r /etc/system.cnf ]; then
-		# Found a caldera system config file .. get the language
-		source /etc/system.cnf
-		if [ "$CONF_LST_LANG" = "us" ]; then
-			CONF_LST_LANG=en
-		elif [ "$CONF_LST_LANG" = "uk" ]; then
-			CONF_LST_LANG=en
-		fi
-		grep "lang=$CONF_LST_LANG," "$wadir/lang_list.txt" >/dev/null 2>&1
-		if [ "$?" = 0 ]; then
-			echo "lang=$CONF_LST_LANG" >> $config_dir/config
-		fi
-	fi
+	echo "lang=en.UTF-8" >> $config_dir/config
 
 	# Turn on logging by default
 	echo "log=1" >> $config_dir/config
@@ -778,7 +768,7 @@ if [ "$nochown" = "" ]; then
 	chmod -R og-w "$wadir"
 	chmod -R a+rx "$wadir"
 fi
-if [ $var_dir != "/var" ]; then
+if [ $var_dir != "/var" -a "$upgrading" != 1 ]; then
 	# Make log directory non-world-readable or writable
 	chown -R root $var_dir
 	chgrp -R bin $var_dir

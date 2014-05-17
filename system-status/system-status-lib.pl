@@ -52,6 +52,7 @@ if (&foreign_installed("package-updates") && $config{'collect_pkgs'}) {
 	&foreign_require("package-updates");
 	my @poss = &package_updates::list_possible_updates(2, 1);
 	$info->{'poss'} = \@poss;
+	$info->{'reboot'} = &package_updates::check_reboot_required();
 	}
 
 # CPU and drive temps
@@ -385,11 +386,14 @@ if (!$config{'collect_notemp'} &&
 	foreach my $d (&smart_status::list_smart_disks_partitions()) {
 		my $st = &smart_status::get_drive_status($d->{'device'}, $d);
 		foreach my $a (@{$st->{'attribs'}}) {
-			if ($a->[0] =~ /^Temperature\s+Celsius$/i &&
+			if (($a->[0] =~ /^Temperature\s+Celsius$/i ||
+			     $a->[0] =~ /^Airflow\s+Temperature\s+Cel/i) &&
 			    $a->[1] > 0) {
 				push(@rv, { 'device' => $d->{'device'},
 					    'temp' => int($a->[1]),
-					    'errors' => $st->{'errors'} });
+					    'errors' => $st->{'errors'},
+					    'failed' => !$st->{'check'} });
+				last;
 				}
 			}
 		}

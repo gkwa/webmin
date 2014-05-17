@@ -33,16 +33,27 @@ if (@keyrecs) {
 				       $kt, 0, "edit_zonekey.cgi?$in");
 		print $text{'zonekey_public'},"<br>\n";
 		print &ui_textarea("keyline", $keyline, 2, 80, "off", 0,
-				   "readonly style='width:90%'"),"<p>\n";
+				   "readonly style='width:90%'"),"<br>\n";
+		print &text('zonekey_publicfile',
+			    "<tt>$key->{'publicfile'}</tt>"),"<p>\n";
 
 		print $text{'zonekey_private'},"<br>\n";
 		print &ui_textarea(
 			"private", $key->{'privatetext'}, 8, 80,
-			"off", 0, "readonly style='width:90%'");
+			"off", 0, "readonly style='width:90%'"),"<br>\n";
+		print &text('zonekey_privatefile',
+			    "<tt>$key->{'privatefile'}</tt>"),"<br>\n";
 		print &ui_hidden_end();
 		}
 	if (!@keys) {
 		print &text('zonekey_noprivate'),"<p>\n";
+		}
+
+	$ds = &get_ds_record($zone);
+	if ($ds) {
+		print $text{'zonekey_ds'},"<br>\n";
+		print &ui_textarea("ds", $ds, 2, 80, "off", 0,
+				   "readonly style='width:90%'"),"<br>\n";
 		}
 
 	# Offer to disable

@@ -1,5 +1,5 @@
 desc=PHP Configuration
-longdesc=Configure PHP settings for the whole system or invidivual Apache virtual servers.
+longdesc=Configure PHP settings for the whole system or individual Apache virtual servers.
 os_support=!windows
 desc_ca=Configuració de PHP
 desc_it=Configurazione di PHP
@@ -11,3 +11,7 @@ desc_de=PHP-Konfiguration
 depends=time
 desc_cz.UTF-8=PHP konfigurace
 desc_no=PHP konfigurasjon
+desc_hu=PHP konfiguráció
+desc_ms_MY=Konfigurasi PHP
+longdesc_ms_MY=Mengkonfigurasi tetapan PHP untuk sistem keseluruhan atau setiap pelayan maya Apache.
+longdesc_de=Konfiguriert PHP-Einstellungen f&#252;r das gesamte System oder individuellen virtuellen Apache-Server.

@@ -361,6 +361,16 @@ foreach my $ext (".dir", ".pag", ".db") {
 return 0;
 }
 
+# delete_dbm_index(user|file)
+# Deletes all DBM indexes for a user or file
+sub delete_dbm_index
+{
+local $ifile = &user_index_file($_[0]);
+foreach my $ext (".dir", ".pag", ".db") {
+	&unlink_file($ifile.$ext);
+	}
+}
+
 # empty_mail(user|file)
 # Truncate a mail file to nothing
 sub empty_mail
@@ -868,11 +878,12 @@ elsif ($sm) {
 	# Connect to SMTP server
 	&open_socket($sm, $port, MAIL);
 	&smtp_command(MAIL);
+	my $helo = $config{'helo_name'} || &get_system_hostname();
 	if ($esmtp) {
-		&smtp_command(MAIL, "ehlo ".&get_system_hostname()."\r\n");
+		&smtp_command(MAIL, "ehlo $helo\r\n");
 		}
 	else {
-		&smtp_command(MAIL, "helo ".&get_system_hostname()."\r\n");
+		&smtp_command(MAIL, "helo $helo\r\n");
 		}
 
 	# Get username and password from parameters, or from module config
@@ -1417,7 +1428,7 @@ return $date;
 # address is returned.
 sub simplify_from
 {
-local $rv = &eucconv(&decode_mimewords($_[0]));
+local $rv = &convert_header_for_display($_[0], 0, 1);
 local @sp = &split_addresses($rv);
 if (!@sp) {
 	return $text{'mail_nonefrom'};
@@ -1433,13 +1444,26 @@ else {
 	}
 }
 
+# convert_header_for_display(string, [max-non-html-length], [no-escape])
+# Given a string from an email header, perform all mime-decoding, charset
+# changes and HTML escaping needed to render it in a browser
+sub convert_header_for_display
+{
+local ($str, $max, $noescape) = @_;
+local ($mw, $cs) = &decode_mimewords($str);
+if (&get_charset() eq 'UTF-8' && &can_convert_to_utf8($mw, $cs)) {
+	$mw = &convert_to_utf8($mw, $cs);
+	}
+local $rv = &eucconv($mw);
+$rv = substr($rv, 0, $max)." .." if ($max && length($rv) > $max);
+return $noescape ? $rv : &html_escape($rv);
+}
+
 # simplify_subject(subject)
-# Simplifies and truncates a subject for display in the mail list
+# Simplifies and truncates a subject header for display in the mail list
 sub simplify_subject
 {
-local $rv = &eucconv(&decode_mimewords($_[0]));
-$rv = substr($rv, 0, 80)." .." if (length($rv) > 80);
-return &html_escape($rv);
+return &convert_header_for_display($_[0], 80);
 }
 
 # quoted_decode(text)
@@ -1521,7 +1545,11 @@ sub decode_mimewords {
 	die "MIME::Words: unexpected case:\n($encstr) pos $pos\n\t".
 	    "Please alert developer.\n";
     }
-    return join('',map {$_->[0]} @tokens);
+    if (wantarray) {
+	return (join('',map {$_->[0]} @tokens), $charset);
+    } else {
+	return join('',map {$_->[0]} @tokens);
+    }
 }
 
 # _decode_Q STRING
@@ -1568,6 +1596,33 @@ $rawstr =~ s{([ a-zA-Z0-9\x7F-\xFF]{1,18})}{     ### get next "word"
 }xeg;
 $rawstr =~ s/\?==\?/?= =?/g;
 return $rawstr;
+}
+
+# can_convert_to_utf8(string, string-charset)
+# Check if the appropriate perl modules are available for UTF-8 conversion
+sub can_convert_to_utf8
+{
+my ($str, $cs) = @_;
+return 0 if ($cs eq "UTF-8");
+return 0 if (!$cs);
+eval "use Encode";
+return 0 if ($@);
+eval "use utf8";
+return 0 if ($@);
+return 1;
+}
+
+# convert_to_utf8(string, string-charset)
+# If possible, convert a string to the UTF-8 charset
+sub convert_to_utf8
+{
+my ($str, $cs) = @_;
+&can_convert_to_utf8(@_);	# Load modules
+eval {
+	$str = Encode::decode($cs, $str);
+	utf8::encode($str);
+	};
+return $str;
 }
 
 # encode_mimewords_address(string, %params)
@@ -1649,6 +1704,9 @@ else {
 }
 
 # mail_file_style(user, basedir, style)
+# Given a directory and username, returns the path to that user's mail file
+# under the directory based on the style (which may force use of parts of
+# the username).
 sub mail_file_style
 {
 if ($_[2] == 0) {
@@ -1785,6 +1843,7 @@ sub j2e {
 }
 
 # eucconv_and_escape(string)
+# Convert a string for display
 sub eucconv_and_escape {
 	return &html_escape(&eucconv($_[0]));
 }
@@ -2468,10 +2527,11 @@ foreach $f (@{$_[0]}) {
 	local $field = $f->[0];
 	local $what = $f->[1];
 	local $neg = ($field =~ s/^\!//);
+	local $re = $f->[2] ? $what : "\Q$what\E";
 	if ($field eq 'body') {
 		$count++
-		    if (!$neg && $_[2]->{'body'} =~ /\Q$what\E/i ||
-		         $neg && $_[2]->{'body'} !~ /\Q$what\E/i);
+		    if (!$neg && $_[2]->{'body'} =~ /$re/i ||
+		         $neg && $_[2]->{'body'} !~ /$re/i);
 		}
 	elsif ($field eq 'size') {
 		$count++
@@ -2483,28 +2543,28 @@ foreach $f (@{$_[0]}) {
 			join("", map { $_->[0].": ".$_->[1]."\n" }
 				     @{$_[2]->{'headers'}});
 		$count++
-		    if (!$neg && $headers =~ /\Q$what\E/i ||
-			 $neg && $headers !~ /\Q$what\E/i);
+		    if (!$neg && $headers =~ /$re/i ||
+			 $neg && $headers !~ /$re/i);
 		}
 	elsif ($field eq 'all') {
 		local $headers = $_[2]->{'rawheaders'} ||
 			join("", map { $_->[0].": ".$_->[1]."\n" }
 				     @{$_[2]->{'headers'}});
 		$count++
-		    if (!$neg && ($_[2]->{'body'} =~ /\Q$what\E/i ||
-				  $headers =~ /\Q$what\E/i) ||
-		         $neg && ($_[2]->{'body'} !~ /\Q$what\E/i &&
-				  $headers !~ /\Q$what\E/i));
+		    if (!$neg && ($_[2]->{'body'} =~ /$re/i ||
+				  $headers =~ /$re/i) ||
+		         $neg && ($_[2]->{'body'} !~ /$re/i &&
+				  $headers !~ /$re/i));
 		}
 	elsif ($field eq 'status') {
 		$count++
-		    if (!$neg && $_[2]->{$field} =~ /\Q$what\E/i||
-		         $neg && $_[2]->{$field} !~ /\Q$what\E/i);
+		    if (!$neg && $_[2]->{$field} =~ /$re/i||
+		         $neg && $_[2]->{$field} !~ /$re/i);
 		}
 	else {
 		$count++
-		    if (!$neg && $_[2]->{'header'}->{$field} =~ /\Q$what\E/i||
-		         $neg && $_[2]->{'header'}->{$field} !~ /\Q$what\E/i);
+		    if (!$neg && $_[2]->{'header'}->{$field} =~ /$re/i||
+		         $neg && $_[2]->{'header'}->{$field} !~ /$re/i);
 		}
 	return 1 if ($count && !$_[1]);
 	}

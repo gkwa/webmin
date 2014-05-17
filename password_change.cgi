@@ -190,9 +190,10 @@ else {
 # Change password in Usermin too
 if (&get_product_name() eq 'usermin' &&
     &foreign_check("changepass")) {
-	# XXX remote user??
 	&foreign_require("changepass", "changepass-lib.pl");
 	&changepass::change_mailbox_passwords(
+		$in{'user'}, $in{'old'}, $in{'new1'});
+	&changepass::change_samba_password(
 		$in{'user'}, $in{'old'}, $in{'new1'});
 	}
 
@@ -250,7 +251,7 @@ while ( @_ ) {
 	elsif ($code == PAM_PROMPT_ECHO_OFF()) {
 		# Assume asking for a password (old first, then new)
 		push @res, PAM_SUCCESS();
-		if ($msg =~ /old|current/i) {
+		if ($msg =~ /old|current|login/i) {
 			push @res, $in{'old'};
 			}
 		else {

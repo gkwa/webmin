@@ -223,16 +223,26 @@ ioctl($ttyfh, 0x540e, 0);
 
 # get_memory_info()
 # Returns a list containing the real mem, free real mem, swap and free swap,
-# and possibly cached memory (In kilobytes).
+# and possibly cached memory and the burstable limit. All of these are in Kb.
 sub get_memory_info
 {
 local %m;
-if (open(BEAN, "/proc/user_beancounters")) {
+local $memburst;
+if (&running_in_openvz() && open(BEAN, "/proc/user_beancounters")) {
 	# If we are running under Virtuozzo, there may be a limit on memory
-	# use in force that is less than the real system's memory.
+	# use in force that is less than the real system's memory. Or it may be
+	# a higher 'burstable' limit. Use this, unless it is unreasonably
+	# high (like 1TB)
+	local $pagesize = 1024;
+	eval {
+		use POSIX;
+		$pagesize = POSIX::sysconf(POSIX::_SC_PAGESIZE);
+		};
 	while(<BEAN>) {
-		if (/privvmpages\s+(\d+)\s+(\d+)\s+(\d+)/) {
-			return ($3, $3-$1, undef, undef);
+		if (/privvmpages\s+(\d+)\s+(\d+)\s+(\d+)/ &&
+                    $3 < 1024*1024*1024*1024) {
+			$memburst = $3 * $pagesize / 1024;
+			last;
 			}
 		}
 	close(BEAN);
@@ -244,10 +254,31 @@ while(<MEMINFO>) {
 		}
 	}
 close(MEMINFO);
-return ( $m{'memtotal'}, $m{'cached'} > $m{'memtotal'} ? $m{'memfree'}
-				: $m{'memfree'}+$m{'buffers'}+$m{'cached'},
+local $memtotal;
+if ($memburst && $memburst > $m{'memtotal'}) {
+	# Burstable limit is higher than actual RAM
+	$memtotal = $m{'memtotal'};
+	}
+elsif ($memburst && $memburst < $m{'memtotal'}) {
+	# Limit is less than actual RAM
+	$memtotal = $memburst;
+	$memburst = undef;
+	}
+elsif ($memburst && $memburst == $m{'memtotal'}) {
+	# Same as actual RAM
+	$memtotal = $memburst;
+	$memburst = undef;
+	}
+elsif (!$memburst) {
+	# No burstable limit set, like on a real system
+	$memtotal = $m{'memtotal'};
+	}
+return ( $memtotal,
+	 $m{'cached'} > $memtotal ? $m{'memfree'} :
+		$m{'memfree'}+$m{'buffers'}+$m{'cached'},
 	 $m{'swaptotal'}, $m{'swapfree'},
-	 $m{'buffers'} + $m{'cached'} );
+	 $m{'buffers'} + $m{'cached'},
+	 $memburst, );
 }
 
 # os_get_cpu_info()

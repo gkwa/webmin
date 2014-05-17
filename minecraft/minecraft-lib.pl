@@ -11,7 +11,10 @@ our ($module_root_directory, %text, %gconfig, $root_directory, %config,
      $module_name, $remote_user, $base_remote_user, $gpgpath,
      $module_config_directory, @lang_order_list, @root_directories);
 our $history_file = "$module_config_directory/history.txt";
-our $server_jar_url = "https://s3.amazonaws.com/MinecraftDownload/launcher/minecraft_server.jar";
+our $download_page_url = "http://minecraft.net/download";
+our $playtime_dir = "$module_config_directory/playtime";
+
+&foreign_require("webmin");
 
 # check_minecraft_server()
 # Returns an error message if the Minecraft server is not installed
@@ -244,13 +247,25 @@ if (!$nolog) {
 	}
 }
 
+# get_minecraft_log_file()
+sub get_minecraft_log_file
+{
+my $newfile = $config{'minecraft_dir'}."/logs/latest.log";
+if (-r $newfile) {
+	return $newfile;
+	}
+else {
+	return $config{'minecraft_dir'}."/server.log";
+	}
+}
+
 # execute_minecraft_command(command, [no-log], [wait-time])
 # Run a command, and return output from the server log
 sub execute_minecraft_command
 {
 my ($cmd, $nolog, $wait) = @_;
 $wait ||= 100;
-my $logfile = $config{'minecraft_dir'}."/server.log";
+my $logfile = &get_minecraft_log_file();
 my $fh = "LOG";
 &open_readfile($fh, $logfile);
 seek($fh, 0, 2);
@@ -293,7 +308,7 @@ sub list_connected_players
 my @out = &execute_minecraft_command("/list", 1);
 my @rv;
 foreach my $l (@out) {
-	if ($l !~ /players\s+online:/ && $l =~ /\[INFO\]\s+(\S.*)$/) {
+	if ($l !~ /players\s+online:/ && $l =~ /INFO\]:?\s+(\S.*)$/) {
 		push(@rv, split(/,\s+/, $1));
 		}
 	}
@@ -307,13 +322,70 @@ sub get_login_logout_times
 {
 my ($name) = @_;
 my ($ip, $intime, $xx, $yy, $zz, $outtime);
-my $logfile = $config{'minecraft_dir'}."/server.log";
-my $fh = "TAIL";
+my $logfile = &get_minecraft_log_file();
 my @events;
-&open_execute_command($fh, "tail -10000 $logfile", 1, 1);
-while(<$fh>) {
-	if (/^(\d+)\-(\d+)\-(\d+)\s+(\d+):(\d+):(\d+)\s+\[\S+\]\s+(.*)/) {
-		my ($y, $mo, $d, $h, $m, $s, $msg) =($1, $2, $3, $4, $5, $6, $7);
+my @files = ( $logfile );
+if ($logfile =~ /^(.*)\/latest.log$/) {
+	# New server version keeps old rotated log files in gzip format
+	my $dir = $1;
+	my @extras;
+	opendir(DIR, $dir);
+	foreach my $f (readdir(DIR)) {
+		if ($f =~ /^(\d+\-\d+\-\d+-\d+)\.log\.gz$/) {
+			push(@extras, $f);
+			}
+		}
+	closedir(DIR);
+	@extras = sort { $a cmp $b } @extras;
+	unshift(@files, map { "$dir/$_" } @extras);
+
+	# To avoid reading too much, limit to newest 100k of logs
+	my @small;
+	my $total = 0;
+	foreach my $f (reverse(@files)) {
+		push(@small, $f);
+		my @st = stat($f);
+		$total += $st[7];
+		last if ($total > 100000);
+		}
+	@files = reverse(@small);
+	}
+foreach my $f (@files) {
+	my $fh = "TAIL";
+	if ($f =~ /\/latest.log$/) {
+		# Latest log, read all of it
+		&open_readfile($fh, $f);
+		}
+	elsif ($f =~ /\.gz$/) {
+		# Read whole compressed log
+		&open_execute_command($fh, "gunzip -c $f", 1, 1);
+		}
+	else {
+		# Old single log file, read only the last 10k lines
+		&open_execute_command($fh, "tail -10000 $f", 1, 1);
+		}
+	my @tm = localtime(time());
+	while(<$fh>) {
+		my ($y, $mo, $d, $h, $m, $s, $msg);
+		if (/^(\d+)\-(\d+)\-(\d+)\s+(\d+):(\d+):(\d+)\s+\[\S+\]\s+(.*)/) {
+			# Old log format
+			($y, $mo, $d, $h, $m, $s, $msg) = ($1, $2, $3, $4, $5, $6, $7);
+			}
+		elsif (/^\[(\d+):(\d+):(\d+)\]\s+\[[^\[]+\]:\s*(.*)/) {
+			# New log format
+			($h, $m, $s, $msg) = ($1, $2, $3, $4);
+			if ($f =~ /\/(\d+)\-(\d+)\-(\d+)/) {
+				# Get date from old rotated log
+				($y, $mo, $d) = ($1, $2, $3);
+				}
+			else {
+				# Assume latest.log, which is for today
+				($y, $mo, $d) = ($tm[5]+1900, $tm[4]+1, $tm[3]);
+				}
+			}
+		else {
+			next;
+			}
 		if ($msg =~ /^\Q$name\E\[.*\/([0-9\.]+):(\d+)\]\s+logged\s+in.*\((\-?[0-9\.]+),\s+(\-?[0-9\.]+),\s+(\-?[0-9\.]+)\)/) {
 			# Login message
 			$ip = $1;
@@ -332,8 +404,8 @@ while(<$fh>) {
 			     'msg' => $msg });
 			}
 		}
+	close($fh);
 	}
-close($fh);
 return ( $ip, $intime, $xx, $yy, $zz, $outtime, \@events );
 }
 
@@ -376,7 +448,7 @@ sub list_banned_players
 my @out = &execute_minecraft_command("/banlist", 1);
 my @rv;
 foreach my $l (@out) {
-	if ($l !~ /banned\s+players:/ && $l =~ /\[INFO\]\s+(\S.*)$/) {
+	if ($l !~ /banned\s+players:/ && $l =~ /INFO\]:?\s+(\S.*)$/) {
 		push(@rv, grep { $_ ne "and" } split(/[, ]+/, $1));
 		}
 	}
@@ -390,7 +462,7 @@ sub list_whitelisted_players
 my @out = &execute_minecraft_command("/whitelist list", 1);
 my @rv;
 foreach my $l (@out) {
-	if ($l !~ /whitelisted\s+players:/ && $l =~ /\[INFO\]\s+(\S.*)$/) {
+	if ($l !~ /whitelisted\s+players:/ && $l =~ /INFO\]:?\s+(\S.*)$/) {
 		push(@rv, grep { $_ ne "and" } split(/[, ]+/, $1));
 		}
 	}
@@ -474,7 +546,7 @@ sub list_banned_ips
 my @out = &execute_minecraft_command("/banlist ips", 1);
 my @rv;
 foreach my $l (@out) {
-	if ($l !~ /banned\s+IP\s+addresses:/ && $l =~ /\[INFO\]\s+(\S.*)$/) {
+	if ($l !~ /banned\s+IP\s+addresses:/ && $l =~ /INFO\]:?\s+(\S.*)$/) {
 		push(@rv, grep { $_ ne "and" } split(/[, ]+/, $1));
 		}
 	}
@@ -573,12 +645,25 @@ eval("\$str = \"$str\"");
 return $str;
 }
 
+# get_server_jar_url()
+# Returns the URL for downloading the server JAR file
+sub get_server_jar_url
+{
+my ($host, $port, $page, $ssl) = &parse_http_url($download_page_url);
+return undef if (!$host);
+my ($out, $err);
+&http_download($host, $port, $page, \$out, \$err, undef, $ssl);
+return undef if ($err);
+$out =~ /"((http|https):[^"]+minecraft_server[^"]+\.jar)"/ || return undef;
+return $1;
+}
+
 # check_server_download_size()
 # Returns the size in bytes of the minecraft server that is available 
 # for download
 sub check_server_download_size
 {
-my ($host, $port, $page, $ssl) = &parse_http_url($server_jar_url);
+my ($host, $port, $page, $ssl) = &parse_http_url(&get_server_jar_url());
 
 # Make HTTP connection
 my @headers;
@@ -754,5 +839,187 @@ if (time() - $config{'last_check'} > 6*60*60) {
 	&save_module_config();
 	}
 }
+
+# get_current_day_usage()
+# Returns a hash ref from usernames to total usage over the last day, and
+# usage that counts towards any limits
+sub get_current_day_usage
+{
+my $logfile = &get_minecraft_log_file();
+
+# Seek back till we find a day line from a previous day
+my @st = stat($logfile);
+return { } if (!@st);
+my $pos = $st[7];
+open(LOGFILE, $logfile);
+my @tm = localtime(time());
+my $wantday = sprintf("%4.4d-%2.2d-%2.2d", $tm[5]+1900, $tm[4]+1, $tm[3]);
+while(1) {
+	$pos -= 4096;
+	$pos = 0 if ($pos < 0);
+	seek(LOGFILE, $pos, 0);
+	last if ($pos == 0);
+	my $dummy = <LOGFILE>;	# Skip partial line
+	my $line = <LOGFILE>;
+	$line =~ /^((\d+)\-(\d+)\-(\d+))/ || next;
+	if ($1 ne $wantday) {
+		# Found a line for another day
+		last;
+		}
+	}
+
+# Read forwards, looking for logins and logouts for today
+my (%rv, %limit_rv);
+my (%lastlogin, %limit_lastlogin);
+while(my $line = <LOGFILE>) {
+	my ($day, $secs);
+	if ($line =~ /^((\d+)\-(\d+)\-(\d+))\s+(\d+):(\d+):(\d+)/) {
+		# Old log format, which contains the day and time
+		$day = $1;
+		$day eq $wantday || next;
+		$secs = $5*60*60 + $6*60 + $7;
+		}
+	elsif ($line =~ /^\[(\d+):(\d+):(\d+)\]/) {
+		# New log format, assume that it is for the current day
+		$day = $wantday;
+		$secs = $1*60*60 + $2*60 + $3;
+		}
+	if ($line =~ /\s(\S+)\[.*\/([0-9\.]+):(\d+)\]\s+logged\s+in\s/) {
+		# Login by a user
+		my ($u, $ip) = ($1, $2);
+		$lastlogin{$u} = $secs;
+		if (&limit_user($ip, $u, $day)) {
+			$limit_lastlogin{$u} = $secs;
+			}
+		}
+	elsif ($line =~ /\s(\S+)(\s*\[[^\]]+\])?\s+lost\s+connection/) {
+		# Logout .. count time
+		if (defined($lastlogin{$1})) {
+			# Add time from last login
+			$rv{$1} += $secs - $lastlogin{$1};
+			delete($lastlogin{$1});
+			}
+		if (defined($limit_lastlogin{$1})) {
+			# Also for login that counts towards limits
+			$limit_rv{$1} += $secs - $limit_lastlogin{$1};
+			delete($limit_lastlogin{$1});
+			}
+		}
+	}
+close(LOGFILE);
+
+# Add any active sessions
+my $now = $tm[2]*60*60 + $tm[1]*60 + $tm[0];
+foreach my $u (keys %lastlogin) {
+	$rv{$u} += $now - $lastlogin{$u};
+	}
+foreach my $u (keys %limit_lastlogin) {
+	$limit_rv{$u} += $now - $limit_lastlogin{$u};
+	}
+
+return (\%rv, \%limit_rv);
+}
+
+# nice_seconds(secs)
+# Converts a number of seconds into HH:MM format
+sub nice_seconds
+{
+my ($time) = @_;
+my $days = int($time / (24*60*60));
+my $hours = int($time / (60*60)) % 24;
+my $mins = sprintf("%d", int($time / 60) % 60);
+my $secs = sprintf("%d", int($time) % 60);
+if ($days) {
+	return "$days days, $hours hours, $mins mins";
+	}
+elsif ($hours) {
+	return "$hours hours, $mins mins";
+	}
+else {
+	return "$mins mins";
+	}
+}
+
+# limit_user(ip, user, date)
+# Returns 1 if some usage should be counted for limiting purposes
+sub limit_user
+{
+my ($ip, $user, $date) = @_;
+my @users = split(/\s+/, $config{'playtime_users'});
+if (@users && &indexoflc($user, @users) < 0) {
+	return 0;
+	}
+my @ips = split(/\s+/, $config{'playtime_ips'});
+if (@ips && !&webmin::ip_match($ip, @ips)) {
+	return 0;
+	}
+my @days = split(/\s+/, $config{'playtime_days'});
+if (@days > 0 && @days < 7) {
+	my ($y, $m, $d) = split(/\-/, $date);
+	my @tm = localtime(timelocal(0, 0, 0, $d, $m-1, $y-1900));
+	if (@tm && &indexof($tm[6], @days) < 0) {
+		return 0;
+		}
+	}
+return 1;
+}
+
+# check_playtime_limits()
+# Function called by webmincron to update and enforce playtime usage
+sub check_playtime_limits
+{
+# Get usage for today, and update today's files
+my ($usage, $limit_usage) = &get_current_day_usage();
+if (!-d $playtime_dir) {
+	&make_dir($playtime_dir, 0700);
+	}
+my $today = strftime("%Y-%m-%d", localtime(time()));
+my (@bans, @unbans);
+foreach my $u (keys %$usage) {
+	my $ufile = "$playtime_dir/$u";
+	my %days;
+	&read_file($ufile, \%days);
+	$days{"total_".$today} = $usage->{$u};
+	$days{"limit_".$today} = $limit_usage->{$u};
+	if ($config{'playtime_max'} &&
+            $limit_usage->{$u} > $config{'playtime_max'}*60) {
+		# Flag as banned
+		if (!$days{"banned_".$today}) {
+			$days{"banned_".$today} = 1;
+			push(@bans, $u);
+			}
+		}
+	else {
+		# Not banned
+		if ($days{"banned_".$today}) {
+			push(@unbans, $u);
+			}
+		}
+	&write_file($ufile, \%days);
+	}
+
+# Band and un-ban players
+my @banned = &list_banned_players();
+foreach my $u (@bans) {
+	&execute_minecraft_command(
+	    "/ban $u Exceeded $config{'playtime_max'} minutes of play time");
+	}
+foreach my $u (@unbans) {
+	&execute_minecraft_command("/pardon $u");
+	}
+}
+
+# get_playtime_job()
+# Returns the webmincron job to enforce play time limits
+sub get_playtime_job
+{
+&foreign_require("webmincron");
+my @jobs = &webmincron::list_webmin_crons();
+my ($job) = grep { $_->{'module'} eq $module_name &&
+		   $_->{'func'} eq "check_playtime_limits" } @jobs;
+return $job;
+}
+
+
 
 1;

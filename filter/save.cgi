@@ -7,10 +7,10 @@ use Time::Local;
 &ReadParse();
 
 # Find existing filter object
-&lock_file($procmail::procmailrc);
 @filters = &list_filters();
 if (!$in{'new'}) {
 	($filter) = grep { $_->{'index'} == $in{'idx'} } @filters;
+	$filter || &error($text{'save_egone'});
 	}
 else {
 	$filter = { 'index' => scalar(@filters) };
@@ -18,7 +18,42 @@ else {
 
 if ($in{'delete'}) {
 	# Just remove
+	&lock_file($procmail::procmailrc);
 	&delete_filter($filter);
+	&unlock_file($procmail::procmailrc);
+	&redirect("");
+	}
+elsif ($in{'apply'}) {
+	# Redirect to mail search, with keys from filter
+	if ($filter->{'condspam'}) {
+		# Is spam or not?
+		&redirect("../mailbox/mail_search.cgi?".
+			  "id=".&urlize($in{'applyfrom'})."&".
+			  "field_0=X-Spam-Status&".
+			  "what_0=Yes");
+		}
+	elsif ($filter->{'condlevel'}) {
+		# Spam level at least
+		&redirect("../mailbox/mail_search.cgi?".
+			  "id=".&urlize($in{'applyfrom'})."&".
+			  "spam=1&score=".$filter->{'condlevel'});
+		}
+	else {
+		# Some other header
+		$field = $filter->{'condheader'};
+		$what = $filter->{'condvalue'};
+		$field = lc($field);
+		# XXX regexp checkbox?
+		&redirect("../mailbox/mail_search.cgi?".
+			  "id=".&urlize($in{'applyfrom'})."&".
+			  "field_0=".&urlize($field)."&".
+			  "what_0=".&urlize($what)."&".
+			  "re_0=1");
+		}
+	}
+elsif ($in{'move'}) {
+	# Redirect to move CGI
+	&redirect("move.cgi?idx=$in{'idx'}");
 	}
 else {
 	# Validate and store inputs
@@ -192,6 +227,13 @@ else {
 				error($text{'save_echarset'});
 			$filter->{'reply'}->{'charset'} = $in{'charset'};
 			}
+		# Save subject
+		if ($in{'subject_def'}) {
+			delete($filter->{'reply'}->{'subject'});
+			}
+		else {
+			$filter->{'reply'}->{'subject'} = $in{'subject'};
+			}
 		}
 	elsif ($in{'amode'} == 7) {
 		# Create a new folder for saving (always in Maildir format)
@@ -211,12 +253,13 @@ else {
 	$filter->{'continue'} = $in{'continue'};
 
 	# Save or create
+	&lock_file($procmail::procmailrc);
 	if ($in{'new'}) {
 		&create_filter($filter);
 		}
 	else {
 		&modify_filter($filter);
 		}
+	&unlock_file($procmail::procmailrc);
+	&redirect("");
 	}
-&unlock_file($procmail::procmailrc);
-&redirect("");

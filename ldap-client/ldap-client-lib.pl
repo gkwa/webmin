@@ -7,11 +7,22 @@ use WebminCore;
 @base_types = ("passwd", "shadow", "group", "hosts", "networks", "netmasks",
 	       "services", "protocols", "aliases", "netgroup");
 
+# get_ldap_config_file()
+# Returns the first config file that exists
+sub get_ldap_config_file
+{
+my @confs = split(/\s+/, $config{'auth_ldap'});
+foreach my $c (@$confs) {
+	return $c if (-e $c);
+	}
+return $confs[0];
+}
+
 # get_config()
 # Parses the NSS LDAP config file into a list of names and values
 sub get_config
 {
-local $file = $_[0] || $config{'auth_ldap'};
+local $file = $_[0] || &get_ldap_config_file();
 if (!scalar(@get_config_cache)) {
 	local $lnum = 0;
 	@get_config_cache = ( );
@@ -69,9 +80,10 @@ sub save_directive
 local ($conf, $name, $value) = @_;
 local $old = &find($name, $conf);
 local $oldcmt = &find($name, $conf, 1);
+local $deffile = &get_ldap_config_file();
 local $lref = &read_file_lines($old ? $old->{'file'} :
 			       $oldcmt ? $oldcmt->{'file'} :
-				         $config{'auth_ldap'});
+				         $deffile);
 if (defined($value) && $old) {
 	# Just update value
 	$old->{'value'} = $value;
@@ -99,7 +111,7 @@ elsif ($value) {
 		       'value' => $value,
 		       'enabled' => 1,
 		       'line' => scalar(@$lref),
-		       'file' => $config{'auth_ldap'} });
+		       'file' => $deffile });
 	push(@$lref, "$name $value");
 	}
 }
@@ -167,7 +179,7 @@ elsif ($_[0]) { return $err; }		# Caller asked for error return
 else { &error($err); }			# Caller asked for error() call
 }
 
-# generic_ldap_connect([host], [port], [login], [password])
+# generic_ldap_connect([host], [port], [ssl], [login], [password])
 # A generic function for connecting to an LDAP server. Uses the system's
 # LDAP client config file if any parameters are missing. Returns the LDAP
 # handle on success or an error message on failure.
@@ -180,9 +192,10 @@ eval "use Net::LDAP";
 if ($@) {
 	return &text('ldap_emodule2', "<tt>Net::LDAP</tt>");
 	}
-if (!-r $config{'auth_ldap'}) {
+my $deffile = &get_ldap_config_file();
+if (!-r $deffile) {
 	$ldap_hosts && $ldap_user ||
-		return &text('ldap_econf', "<tt>$config{'auth_ldap'}</tt>");
+		return &text('ldap_econf', "<tt>$deffile</tt>");
 	}
 
 # Get the host and port
@@ -194,6 +207,7 @@ local $cafile = &find_svalue("tls_cacertfile", $conf);
 local $certfile = &find_svalue("tls_cert", $conf);
 local $keyfile = &find_svalue("tls_key", $conf);
 local $ciphers = &find_svalue("tls_ciphers", $conf);
+local $host;
 if ($ldap_hosts) {
 	# Using hosts from parameter
 	local @hosts = split(/[ \t,]+/, $ldap_hosts);
@@ -207,11 +221,11 @@ if ($ldap_hosts) {
 	local $port = $ldap_port ||
 		      &find_svalue("port", $conf) ||
 		      ($use_ssl == 1 ? 636 : 389);
-	foreach my $host (@hosts) {
+	foreach my $h (@hosts) {
 		eval {
-			$ldap = Net::LDAP->new($host, port => $port,
+			$ldap = Net::LDAP->new($h, port => $port,
 				scheme => $use_ssl == 1 ? 'ldaps' : 'ldap',
-				inet6 => &should_use_inet6($host));
+				inet6 => &should_use_inet6($h));
 			};
 		if ($@) {
 			$err = &text('ldap_econn2',
@@ -223,6 +237,7 @@ if ($ldap_hosts) {
 				     "<tt>$host</tt>", "<tt>$port</tt>");
 			}
 		else {
+			$host = $h;
 			$err = undef;
 			last;
 			}
@@ -267,15 +282,16 @@ else {
 		      ($use_ssl == 1 ? 636 : 389);
 	@hosts = ( "localhost" ) if (!@hosts);
 
-	foreach $host (@hosts) {
-		$ldap = Net::LDAP->new($host, port => $port,
+	foreach my $h (@hosts) {
+		$ldap = Net::LDAP->new($h, port => $port,
 			       scheme => $use_ssl == 1 ? 'ldaps' : 'ldap',
-			       inet6 => &should_use_inet6($host));
+			       inet6 => &should_use_inet6($h));
 		if (!$ldap) {
 			$err = &text('ldap_econn',
 				     "<tt>$host</tt>", "<tt>$port</tt>");
 			}
 		else {
+			$host = $h;
 			$err = undef;
 			last;
 			}
@@ -372,7 +388,7 @@ local @hosts;
 if ($config{'ldap_hosts'}) {
 	@hosts = split(/\s+/, $config{'ldap_hosts'});
 	}
-elsif (!-r $config{'auth_ldap'}) {
+elsif (!-r &get_ldap_config_file()) {
 	@hosts = ( );
 	}
 else {

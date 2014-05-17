@@ -9,6 +9,12 @@ require './webminlog-lib.pl';
 our (%text, %config, %gconfig, $webmin_logfile, %in, $in);
 &foreign_require("acl", "acl-lib.pl");
 &ReadParse();
+if ($in{'search'}) {
+	# Re-parse args from search param
+	$ENV{'QUERY_STRING'} = $in{'search'};
+	%in = ();
+	&ReadParse(\%in, 'GET');
+	}
 &error_setup($text{'search_err'});
 
 # Use sensible defaults
@@ -106,7 +112,7 @@ while(my ($id, $idx) = each %index) {
 		next if (!&can_mod($act->{'module'}));
 
 		# Check description
-		if ($in{'desc'} =~ /\S/) {
+		if (defined($in{'desc'}) && $in{'desc'} =~ /\S/) {
 			my $desc = &get_action_description($act, $in{'long'});
 			$desc =~ s/<[^>]+>//g;
 			next if ($desc !~ /\Q$in{'desc'}\E/i);
@@ -202,11 +208,10 @@ elsif (@match) {
 		my @cols;
 		my $desc = &get_action_description($act, $in{'long'});
 		my $anno = &get_annotation($act);
-		push(@cols, "<a href='view.cgi?id=$act->{'id'}".
+		push(@cols, &ui_link("view.cgi?id=$act->{'id'}".
 		      "&return=".&urlize($in{'return'} || "").
 		      "&returndesc=".&urlize($in{'returndesc'} || "").
-		      "&search=".&urlize($in || "").
-		      "'>$desc</a>");
+		      "&search=".&urlize($in || ""), $desc) );
 		if ($anno) {
 			$cols[$#cols] .= "&nbsp;<img src=images/star.gif>";
 			}
@@ -218,7 +223,8 @@ elsif (@match) {
 		print &ui_columns_row(\@cols);
 		}
 	print &ui_columns_end();
-	print "<a href='search.cgi/webminlog.csv?$in&csv=1'>$text{'search_csv'}</a><p>\n";
+	print &ui_link("search.cgi/webminlog.csv?$in&csv=1", $text{'search_csv'});
+    print "<p>\n";
 	}
 else {
 	# Tell the user that nothing matches

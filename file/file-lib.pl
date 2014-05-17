@@ -109,7 +109,7 @@ $icon_map = (	"c", 1,    "txt", 1,
 		"pl", 1,   "cgi", 1,
 		"html", 1, "htm", 1,
 		"gif", 2,  "jpg", 2,
-		"tar", 3
+		"tar", 3,  "png", 2,
 		);
 
 # file_info_line(path, [displaypath])
@@ -125,23 +125,7 @@ local $dp = $_[1] || $_[0];
 $dp =~ s/\\/\\\\/g;
 $dp =~ s/\t/\\t/g;
 return undef if ($dp =~ /\r|\n/);
-if (!@st) {
-	# Work around a broken stat function on large files on redhat 7.x
-	&has_command("stat") || return undef;
-	local $out = &backquote_command("stat -t ".quotemeta($_[0]));
-	return undef if ($?);
-	$out =~ /^(.*)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/;
-	local $type = defined($icon_map{$ext}) ? $icon_map{$ext} : 4;
-	local $user = %uid_to_user ? $uid_to_user{$5} : getpwuid($5);
-	$user = $5 if (!$user);
-	local $group = %gid_to_group ? $gid_to_group{$6} :getgrgid($6);
-	$group = $6 if (!$group);
-	local $size = $2;
-	local $mtime = $13;
-	local $mode = hex($4);
-	return sprintf ("%s\t%u\t%s\t%s\t%u\t%u\t%u\t%s",
-		$dp, $type, $user, $group, $size, $mode, $mtime, undef);
-	}
+return undef if (!@st);
 local $type = $islink && !$f ? 5 :
 	      -d _ ? 0 :
 	      -b _ ? 6 :
@@ -198,18 +182,21 @@ else {
 # Returns 1 if some file can be edited/deleted
 sub can_access
 {
-return &under_root_dir($_[0], \@allowed_roots) &&
-       ($_[0] eq "/" || !&under_root_dir($_[0], \@denied_roots));
+local $path = &simplify_path($_[0]);
+return &under_root_dir($path, \@allowed_roots) &&
+       ($path eq "/" || !&under_root_dir($path, \@denied_roots));
 }
 
 # under_root_dir(file, &roots)
 # Returns 1 if some file is under one of the given roots
 sub under_root_dir
 {
-local @f = grep { $_ ne '' } split(/\//, $_[0]);
+local $path = &simplify_path($_[0]);
+local $roots = $_[1];
+local @f = grep { $_ ne '' } split(/\//, $path);
 local $r;
-DIR: foreach $r (@{$_[1]}) {
-	return 1 if ($r eq '/' || $_[0] eq '/' || $_[0] eq $r);
+DIR: foreach $r (@$roots) {
+	return 1 if ($r eq '/' || $path eq '/' || $path eq $r);
 	local @a = grep { $_ ne '' } split(/\//, $r);
 	local $i;
 	for($i=0; $i<@a; $i++) {
@@ -225,8 +212,9 @@ return 0;
 # directories are included as well.
 sub can_list
 {
-return &under_root_dir_or_parent($_[0], \@allowed_roots) &&
-       ($_[0] eq "/" || !&under_root_dir($_[0], \@denied_roots));
+local $path = &simplify_path($_[0]);
+return &under_root_dir_or_parent($path, \@allowed_roots) &&
+       ($path eq "/" || !&under_root_dir($path, \@denied_roots));
 }
 
 # under_root_dir_or_parent(file, &roots)
@@ -477,7 +465,7 @@ if ($userconfig{'nocharset'} || $config{'nocharset'}) {
 	print "Content-type: $type\n\n";
 	}
 else {
-	$charset = &get_charset();
+	my $charset = &get_charset();
 	print "Content-type: $type; charset=$charset\n\n";
 	}
 }

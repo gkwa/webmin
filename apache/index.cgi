@@ -107,7 +107,11 @@ if (&can_edit_virt()) {
 
 # add other servers
 @virt = &find_directive_struct("VirtualHost", $conf);
-if ($httpd_modules{'core'} >= 1.3) {
+if ($httpd_modules{'core'} >= 2.4) {
+	# Apache 2.4 makes all IPs name-based
+	$nv{"*"}++;
+	}
+elsif ($httpd_modules{'core'} >= 1.3) {
 	# build list of name-based virtual host IP addresses
 	@nv = &find_directive("NameVirtualHost", $conf);
 	foreach $nv (@nv) {
@@ -302,15 +306,15 @@ if ($config{'max_servers'} && @vname > $config{'max_servers'}) {
 	print "<b>$text{'index_toomany'}</b><p>\n";
 	print "<form action=search_virt.cgi>\n";
 	print "<b>$text{'index_find'}</b> <select name=field>\n";
-	print "<option value=name checked> $text{'index_name'}\n";
-	print "<option value=port> $text{'index_port'}\n";
-	print "<option value=addr> $text{'index_addr'}\n";
-	print "<option value=root> $text{'index_root'}\n";
+	print "<option value=name checked>$text{'index_name'}</option>\n";
+	print "<option value=port>$text{'index_port'}</option>\n";
+	print "<option value=addr>$text{'index_addr'}</option>\n";
+	print "<option value=root>$text{'index_root'}</option>\n";
 	print "</select> <select name=match>\n";
-	print "<option value=0 checked>$text{'index_equals'}\n";
-	print "<option value=1>$text{'index_matches'}\n";
-	print "<option value=2>$text{'index_nequals'}\n";
-	print "<option value=3>$text{'index_nmatches'}\n";
+	print "<option value=0 checked>$text{'index_equals'}</option>\n";
+	print "<option value=1>$text{'index_matches'}</option>\n";
+	print "<option value=2>$text{'index_nequals'}</option>\n";
+	print "<option value=3>$text{'index_nmatches'}</option>\n";
 	print "</select> <input name=what size=15>&nbsp;&nbsp;\n";
 	print "<input type=submit value=\"$text{'find'}\"></form><p>\n";
 	$formno++;
@@ -331,13 +335,13 @@ elsif ($config{'show_list'} && scalar(@vname)) {
 		$text{'index_url'} ], 100);
 	for($i=0; $i<@vname; $i++) {
 		local @cols;
-		push(@cols, "<a href=\"$vlink[$i]\">$vname[$i]</a>");
+		push(@cols, &ui_link($vlink[$i], $vname[$i]) );
 		push(@cols, &html_escape($vaddr[$i]));
 		push(@cols, &html_escape($vport[$i]));
 		push(@cols, $vserv[$i] || $text{'index_auto'});
 		push(@cols, &html_escape($vproxy[$i]) ||
 			    &html_escape($vroot[$i]));
-		push(@cols, "<a href=$vurl[$i]>$text{'index_view'}</a>");
+		push(@cols, &ui_link($vurl[$i], $text{'index_view'}) );
 		if ($showdel && $vidx[$i]) {
 			print &ui_checked_columns_row(\@cols, undef,
 						      "d", $vidx[$i]);
@@ -409,7 +413,8 @@ if ($access{'create'}) {
 		    [ 2, "$text{'index_any2'}<br>" ],
 		    [ 0, $text{'index_any0'}." ".
 			 &ui_textbox("addr", undef, 40) ] ])."<br>\n".
-		&ui_checkbox("nv", 1, $text{'index_nv'}, 1)."<br>".
+		($httpd_modules{'core'} < 2.4 ?
+		  &ui_checkbox("nv", 1, $text{'index_nv'}, 1)."<br>" : "").
 		&ui_checkbox("listen", 1, $text{'index_listen'}, 1));
 
 	# Work out sensible default port

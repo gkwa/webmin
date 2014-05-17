@@ -511,7 +511,7 @@ and store it in the global %in hash. The optional parameters are :
 sub ReadParseMime
 {
 my ($max, $cbfunc, $cbargs) = @_;
-my ($boundary, $line, $foo, $name, $got, $file);
+my ($boundary, $line, $foo, $name, $got, $file, $count_lines, $max_lines);
 my $err = &text('readparse_max', $max);
 $ENV{'CONTENT_TYPE'} =~ /boundary=(.*)$/ || &error($text{'readparse_enc'});
 if ($ENV{'CONTENT_LENGTH'} && $max && $ENV{'CONTENT_LENGTH'} > $max) {
@@ -519,6 +519,8 @@ if ($ENV{'CONTENT_LENGTH'} && $max && $ENV{'CONTENT_LENGTH'} > $max) {
 	}
 &$cbfunc(0, $ENV{'CONTENT_LENGTH'}, $file, @$cbargs) if ($cbfunc);
 $boundary = $1;
+$count_lines = 0;
+$max_lines = 1000;
 <STDIN>;	# skip first boundary
 while(1) {
 	$name = "";
@@ -569,8 +571,12 @@ while(1) {
 	while(1) {
 		$line = <STDIN>;
 		$got += length($line);
-		&$cbfunc($got, $ENV{'CONTENT_LENGTH'}, $file, @$cbargs)
-			if ($cbfunc);
+		$count_lines++;
+		if ($count_lines == $max_lines) {
+			&$cbfunc($got, $ENV{'CONTENT_LENGTH'}, $file, @$cbargs)
+				if ($cbfunc);
+			$count_lines = 0;
+			}
 		if ($max && $got > $max) {
 			#print STDERR "over limit of $max\n";
 			#&error($err);
@@ -581,8 +587,6 @@ while(1) {
 				if ($cbfunc);
 			return;
 			}
-		my $ptline = $line;
-		$ptline =~ s/[^a-zA-Z0-9\-]/\./g;
 		if (index($line, $boundary) != -1) { last; }
 		$in{$name} .= $line;
 		}
@@ -746,7 +750,12 @@ if ($pragma_no_cache || $gconfig{'pragma_no_cache'}) {
 	print "Cache-Control: no-store, no-cache, must-revalidate\n";
 	print "Cache-Control: post-check=0, pre-check=0\n";
 	}
-print "X-Frame-Options: SAMEORIGIN\n";
+if (!$gconfig{'no_frame_options'}) {
+	print "X-Frame-Options: SAMEORIGIN\n";
+	}
+if (!$gconfig{'no_content_security_policy'}) {
+	print "Content-Security-Policy: script-src 'self' 'unsafe-inline'\n";
+	}
 if (defined($_[0])) {
 	print "Content-type: text/html; Charset=$_[0]\n\n";
 	}
@@ -823,12 +832,12 @@ my $link = defined($tconfig{'cs_link'}) ? $tconfig{'cs_link'} :
 	      defined($gconfig{'cs_link'}) ? $gconfig{'cs_link'} : "0000ee";
 my $text = defined($tconfig{'cs_text'}) ? $tconfig{'cs_text'} : 
 	      defined($gconfig{'cs_text'}) ? $gconfig{'cs_text'} : "000000";
-my $bgimage = defined($tconfig{'bgimage'}) ? "background=$tconfig{'bgimage'}"
-					      : "";
-my $dir = $current_lang_info->{'dir'} ? "dir=\"$current_lang_info->{'dir'}\""
-					 : "";
-print "<body bgcolor=#$bgcolor link=#$link vlink=#$link text=#$text ",
-      "$bgimage $tconfig{'inbody'} $dir $_[8]>\n";
+my $bgimage = defined($tconfig{'bgimage'}) ? "background=$tconfig{'bgimage'}" : "";
+my $dir = $current_lang_info->{'dir'} ? "dir=\"$current_lang_info->{'dir'}\"" : "";
+my $html_body = "<body bgcolor=#$bgcolor link=#$link vlink=#$link text=#$text $bgimage $tconfig{'inbody'} $dir $_[8]>\n";
+$html_body =~ s/\s+\>/>/g;
+print $html_body;
+
 if (defined(&theme_prebody)) {
 	&theme_prebody(@_);
 	}
@@ -1036,8 +1045,8 @@ if ($textonly) {
 	}
 else {
 	$line =~ s/\r|\n//g;
-	return "<script language=JavaScript type=text/javascript>\n".
-	       "defaultStatus=\"".&quote_escape($line)."\";\n".
+	return "<script type='text/javascript'>\n".
+	       "window.defaultStatus=\"".&quote_escape($line)."\";\n".
 	       "</script>\n";
 	}
 }
@@ -1873,7 +1882,7 @@ sub put_miniserv_config
 	    $_[0]);
 }
 
-=head2 restart_miniserv([nowait])
+=head2 restart_miniserv([nowait], [ignore-errors])
 
 Kill the old miniserv process and re-start it, then optionally waits for
 it to restart. This will apply all configuration settings.
@@ -1881,7 +1890,7 @@ it to restart. This will apply all configuration settings.
 =cut
 sub restart_miniserv
 {
-my ($nowait) = @_;
+my ($nowait, $ignore) = @_;
 return undef if (&is_readonly_mode());
 my %miniserv;
 &get_miniserv_config(\%miniserv) || return;
@@ -1901,24 +1910,27 @@ if ($gconfig{'os_type'} ne 'windows') {
 	if (!$pid || !kill(0, $pid)) {
 		if (!open(PID, $miniserv{'pidfile'})) {
 			print STDERR "PID file $miniserv{'pidfile'} does ",
-				     "not exist\n";
+				     "not exist\n" if (!$ignore);
 			return;
 			}
 		chop($pid = <PID>);
 		close(PID);
 		if (!$pid) {
-			print STDERR "Invalid PID file $miniserv{'pidfile'}\n";
+			print STDERR "Invalid PID file $miniserv{'pidfile'}\n"
+				if (!$ignore);
 			return;
 			}
 		if (!kill(0, $pid)) {
 			print STDERR "PID $pid from file $miniserv{'pidfile'} ",
-			             "is not valid\n";
+			             "is not valid\n" if (!$ignore);
 			return;
 			}
 		}
 
 	# Just signal miniserv to restart
-	&kill_logged('HUP', $pid) || &error("Incorrect Webmin PID $pid");
+	if (!&kill_logged('HUP', $pid)) {
+		&error("Incorrect Webmin PID $pid") if (!$ignore);
+		}
 
 	# Wait till new PID is written, indicating a restart
 	for($i=0; $i<60; $i++) {
@@ -1926,7 +1938,7 @@ if ($gconfig{'os_type'} ne 'windows') {
 		my @newst = stat($miniserv{'pidfile'});
 		last if ($newst[9] != $oldst[9]);
 		}
-	$i < 60 || &error("Webmin server did not write new PID file");
+	$i < 60 || $ignore || &error("Webmin server did not write new PID file");
 
 	## Totally kill the process and re-run it
 	#$SIG{'TERM'} = 'IGNORE';
@@ -1950,11 +1962,11 @@ if (!$nowait) {
 		close(STEST);
 		last if (!$err && ++$ok >= 2);
 		}
-	$i < 20 || &error("Failed to restart Webmin server!");
+	$i < 20 || $ignore || &error("Failed to restart Webmin server!");
 	}
 }
 
-=head2 reload_miniserv
+=head2 reload_miniserv([ignore-errors])
 
 Sends a USR1 signal to the miniserv process, telling it to read-read it's
 configuration files. Not all changes will be applied though, such as the 
@@ -1963,6 +1975,7 @@ IP addresses and ports to accept connections on.
 =cut
 sub reload_miniserv
 {
+my ($ignore) = @_;
 return undef if (&is_readonly_mode());
 my %miniserv;
 &get_miniserv_config(\%miniserv) || return;
@@ -1980,27 +1993,31 @@ if ($gconfig{'os_type'} ne 'windows') {
 	if (!$pid || !kill(0, $pid)) {
 		if (!open(PID, $miniserv{'pidfile'})) {
 			print STDERR "PID file $miniserv{'pidfile'} does ",
-				     "not exist\n";
+				     "not exist\n" if (!$ignore);
 			return;
 			}
 		chop($pid = <PID>);
 		close(PID);
 		if (!$pid) {
-			print STDERR "Invalid PID file $miniserv{'pidfile'}\n";
+			print STDERR "Invalid PID file $miniserv{'pidfile'}\n"
+				if (!$ignore);
 			return;
 			}
 		if (!kill(0, $pid)) {
 			print STDERR "PID $pid from file $miniserv{'pidfile'} ",
-			             "is not valid\n";
+			             "is not valid\n" if (!$ignore);
 			return;
 			}
 		}
-	&kill_logged('USR1', $pid) || &error("Incorrect Webmin PID $pid");
+	if (!&kill_logged('USR1', $pid)) {
+		&error("Incorrect Webmin PID $pid") if (!$ignore);
+		}
 
 	# Make sure this didn't kill Webmin!
 	sleep(1);
 	if (!kill(0, $pid)) {
-		print STDERR "USR1 signal killed Webmin - restarting\n";
+		print STDERR "USR1 signal killed Webmin - restarting\n"
+			if (!$ignore);
 		&system_logged("$config_directory/start >/dev/null 2>&1 </dev/null");
 		}
 	}
@@ -2521,13 +2538,27 @@ if (!$connected) {
 			&$cbfunc(2, int($size));
 			}
 
-		# request the file
-		my $pasv = &ftp_command("PASV", 2, $_[3]);
-		defined($pasv) || return 0;
-		$pasv =~ /\(([0-9,]+)\)/;
-		@n = split(/,/ , $1);
-		&open_socket("$n[0].$n[1].$n[2].$n[3]",
-			$n[4]*256 + $n[5], "CON", $_[3]) || return 0;
+		# are we using IPv6?
+		my $v6 = !&to_ipaddress($host) &&
+			 &to_ip6address($host);
+
+		if ($v6) {
+			# request the file over a EPSV port
+			my $epsv = &ftp_command("EPSV", 2, $_[3]);
+			defined($epsv) || return 0;
+			$epsv =~ /\|(\d+)\|/ || return 0;
+			my $epsvport = $1;
+			&open_socket($host, $epsvport, CON, $_[3]) || return 0;
+			}
+		else {
+			# request the file over a PASV connection
+			my $pasv = &ftp_command("PASV", 2, $_[3]);
+			defined($pasv) || return 0;
+			$pasv =~ /\(([0-9,]+)\)/ || return 0;
+			@n = split(/,/ , $1);
+			&open_socket("$n[0].$n[1].$n[2].$n[3]",
+				$n[4]*256 + $n[5], "CON", $_[3]) || return 0;
+			}
 		&ftp_command("RETR $_[1]", 1, $_[3]) || return 0;
 
 		# transfer data
@@ -2628,12 +2659,25 @@ if ($cbfunc) {
 	&$cbfunc(2, $st[7]);
 	}
 
-# send the file
-my $pasv = &ftp_command("PASV", 2, $_[3]);
-defined($pasv) || return 0;
-$pasv =~ /\(([0-9,]+)\)/;
-@n = split(/,/ , $1);
-&open_socket("$n[0].$n[1].$n[2].$n[3]", $n[4]*256 + $n[5], "CON", $_[3]) || return 0;
+# are we using IPv6?
+my $v6 = !&to_ipaddress($_[0]) && &to_ip6address($_[0]);
+
+if ($v6) {
+	# send the file over a EPSV port
+	my $epsv = &ftp_command("EPSV", 2, $_[3]);
+	defined($epsv) || return 0;
+	$epsv =~ /\|(\d+)\|/ || return 0;
+	my $epsvport = $1;
+	&open_socket($_[0], $epsvport, "CON", $_[3]) || return 0;
+	}
+else {
+	# send the file over a PASV connection
+	my $pasv = &ftp_command("PASV", 2, $_[3]);
+	defined($pasv) || return 0;
+	$pasv =~ /\(([0-9,]+)\)/ || return 0;
+	@n = split(/,/ , $1);
+	&open_socket("$n[0].$n[1].$n[2].$n[3]", $n[4]*256 + $n[5], "CON", $_[3]) || return 0;
+	}
 &ftp_command("STOR $_[1]", 1, $_[3]) || return 0;
 
 # transfer data
@@ -2689,11 +2733,14 @@ parameters are :
 
 =item error - A string reference to write any error message into. If not set, the error function is called on failure.
 
+=item bindip - Local IP address to bind to for outgoing connections
+
 =cut
 sub open_socket
 {
-my ($host, $port, $fh, $err) = @_;
+my ($host, $port, $fh, $err, $bindip) = @_;
 $fh = &callers_package($fh);
+$bindip ||= $gconfig{'bind_proxy'};
 
 if ($gconfig{'debug_what_net'}) {
 	&webmin_debug_log('TCP', "host=$host port=$port");
@@ -2712,7 +2759,7 @@ if ($ip = &to_ipaddress($host)) {
 	my $addr = inet_aton($ip);
 	if ($gconfig{'bind_proxy'}) {
 		# BIND to outgoing IP
-		if (!bind($fh,pack_sockaddr_in(0, inet_aton($gconfig{'bind_proxy'})))) {
+		if (!bind($fh, pack_sockaddr_in(0, inet_aton($bindip)))) {
 			my $msg = "Failed to bind to source address : $!";
 			if ($err) { $$err = $msg; return 0; }
 			else { &error($msg); }
@@ -3004,7 +3051,7 @@ else {
 return $main::file_cache{$realfile};
 }
 
-=head2 flush_file_lines([file], [eol])
+=head2 flush_file_lines([file], [eol], [ignore-unloaded])
 
 Write out to a file previously read by read_file_lines to disk (except
 for those marked readonly). The parameters are :
@@ -3013,14 +3060,22 @@ for those marked readonly). The parameters are :
 
 =item eof - End-of-line character for each line. Defaults to \n.
 
+=item ignore-unloaded - Don't fail if the file isn't loaded
+
 =cut
 sub flush_file_lines
 {
 my @files;
 if ($_[0]) {
 	local $trans = &translate_filename($_[0]);
-	$main::file_cache{$trans} ||
-		&error("flush_file_lines called on non-loaded file $trans");
+	if (!$main::file_cache{$trans}) {
+		if ($_[2]) {
+			return 0;
+			}
+		else {
+			&error("flush_file_lines called on non-loaded file $trans");
+			}
+		}
 	push(@files, $trans);
 	}
 else {
@@ -3040,6 +3095,7 @@ foreach my $f (@files) {
 	delete($main::file_cache{$f});
 	delete($main::file_cache_noflush{$f});
         }
+return scalar(@files);
 }
 
 =head2 unflush_file_lines(file)
@@ -3611,8 +3667,11 @@ elsif ($u ne '') {
 		# Look for this user in the user/group DB, if one is defined
 		# and if the user might be in the DB
 		my ($dbh, $proto, $prefix, $args) = &connect_userdb($userdb);
-		ref($dbh) || &error(&text('euserdbacl', $dbh));
-		if ($proto eq "mysql" || $proto eq "postgresql") {
+		if (!ref($dbh)) {
+			print STDERR "Failed to connect to user database : ".
+				     $dbh."\n";
+			}
+		elsif ($proto eq "mysql" || $proto eq "postgresql") {
 			# Find the user in the SQL DB
 			my $cmd = $dbh->prepare(
 				"select id from webmin_user where name = ?");
@@ -3669,7 +3728,9 @@ elsif ($u ne '') {
 					}
 				}
 			}
-		&disconnect_userdb($userdb, $dbh);
+		if (ref($dbh)) {
+			&disconnect_userdb($userdb, $dbh);
+			}
 		}
 
 	if (!$foundindb) {
@@ -4175,12 +4236,12 @@ if ($main::webmin_script_type eq 'cron') {
 if (($ENV{'WEBMIN_DEBUG'} || $gconfig{'debug_enabled'}) &&
     !$main::opened_debug_log++) {
 	my $dlog = $gconfig{'debug_file'} || $main::default_debug_log_file;
-	if ($gconfig{'debug_size'}) {
-		my @st = stat($dlog);
-		if ($st[7] > $gconfig{'debug_size'}) {
-			rename($dlog, $dlog.".0");
-			}
+	my $dsize = $gconfig{'debug_size'} || $main::default_debug_log_size;
+	my @st = stat($dlog);
+	if ($dsize && $st[7] > $dsize) {
+		rename($dlog, $dlog.".0");
 		}
+
 	open(main::DEBUGLOG, ">>$dlog");
 	$main::opened_debug_log = 1;
 
@@ -4729,6 +4790,46 @@ while ($str =~ /(.{1,60})/gs) {
 return $res;
 }
 
+=head2 encode_base32(string)
+
+Encodes a string into base32 format.
+
+=cut
+sub encode_base32
+{
+$_ = shift @_;
+my ($buffer, $l, $e);
+$_ = unpack('B*', $_);
+s/(.....)/000$1/g;
+$l = length;
+if ($l & 7) {
+	$e = substr($_, $l & ~7);
+	$_ = substr($_, 0, $l & ~7);
+	$_ .= "000$e" . '0' x (5 - length $e);
+	}
+$_ = pack('B*', $_);
+tr|\0-\37|A-Z2-7|;
+$_;
+}
+
+=head2 decode_base32(string)
+
+Converts a base32-encoded string into plain text. The opposite of encode_base32.
+
+=cut
+sub decode_base32
+{
+$_ = shift;
+my ($l);
+tr|A-Z2-7|\0-\37|;
+$_ = unpack('B*', $_);
+s/000(.....)/$1/g;
+$l = length;
+$_ = substr($_, 0, $l & ~7) if $l & 7;
+$_ = pack('B*', $_);
+return $_;
+}
+
 =head2 get_module_info(module, [noclone], [forcache])
 
 Returns a hash containg details of the given module. Some useful keys are :
@@ -5084,6 +5185,9 @@ to work OK. The parameters are :
 sub lock_file
 {
 my ($file, $readonly, $forcefile) = @_;
+if ($file =~ /\r|\n|\0/) {
+	&error("Lock filename contains invalid characters");
+	}
 my $realfile = &translate_filename($file);
 return 0 if (!$file || defined($main::locked_file_list{$realfile}));
 my $no_lock = !&can_lock_file($realfile);
@@ -5100,6 +5204,11 @@ while(1) {
 		# Got the lock!
 		if (!$no_lock) {
 			# Create the .lock file
+			if (-l "$realfile.lock") {
+				# Locks cannot be a symlink, as this could allow
+				# file over-writing
+				unlink("$realfile.lock");
+				}
 			open(LOCKING, ">$realfile.lock") || return 0;
 			my $lck = eval "flock(LOCKING, 2+4)";
 			my $err = $!;
@@ -6417,16 +6526,12 @@ if ($serv->{'fast'} || !$sn) {
 	elsif (!$fast_fh_cache{$sn}) {
 		# Open the connection by running fastrpc.cgi locally
 		pipe(RPCOUTr, RPCOUTw);
-		pipe(RPCERRr, RPCERRw);
 		if (!fork()) {
 			untie(*STDIN);
 			untie(*STDOUT);
-			untie(*STDERR);
 			open(STDOUT, ">&RPCOUTw");
-			open(STDERR, ">&RPCERRw");
 			close(STDIN);
 			close(RPCOUTr);
-			close(RPCERRr);
 			$| = 1;
 			$ENV{'REQUEST_METHOD'} = 'GET';
 			$ENV{'SCRIPT_NAME'} = '/fastrpc.cgi';
@@ -6450,7 +6555,6 @@ if ($serv->{'fast'} || !$sn) {
 				}
 			}
 		close(RPCOUTw);
-		close(RPCERRw);
 		my $line;
 		do {
 			($line = <RPCOUTr>) =~ tr/\r\n//d;
@@ -6458,14 +6562,12 @@ if ($serv->{'fast'} || !$sn) {
 		$line = <RPCOUTr>;
 		if ($line =~ /^0\s+(.*)/) {
 			close(RPCOUTr);
-			close(RPCERRr);
 			return &$main::remote_error_handler("RPC error : $2");
 			}
 		elsif ($line =~ /^1\s+(\S+)\s+(\S+)/) {
 			# Started ok .. connect and save SID
 			close(SOCK);
 			close(RPCOUTr);
-			close(RPCERRr);
 			my ($port, $sid, $error) = ($1, $2, undef);
 			&open_socket("localhost", $port, $sid, \$error);
 			return &$main::remote_error_handler("Failed to connect to fastrpc.cgi : $error") if ($error);
@@ -6478,10 +6580,6 @@ if ($serv->{'fast'} || !$sn) {
 				$line .= $_;
 				}
 			close(RPCOUTr);
-			while(<RPCERRr>) {
-				$line .= $_;
-				}
-			close(RPCERRr);
 			return &$main::remote_error_handler(
 				"Bad response from fastrpc.cgi : $line");
 			}
@@ -6943,10 +7041,12 @@ The parameters are :
 
 =item headers - Array ref of additional HTTP headers, each of which is a 2-element array ref.
 
+=item bindip - IP address to bind to for outgoing HTTP connection
+
 =cut
 sub make_http_connection
 {
-my ($host, $port, $ssl, $method, $page, $headers) = @_;
+my ($host, $port, $ssl, $method, $page, $headers, $bindip) = @_;
 my $htxt;
 if ($headers) {
 	foreach my $h (@$headers) {
@@ -6973,7 +7073,7 @@ if ($ssl) {
 	    !&no_proxy($host)) {
 		# Via proxy
 		my $error;
-		&open_socket($1, $2, $rv->{'fh'}, \$error);
+		&open_socket($1, $2, $rv->{'fh'}, \$error, $bindip);
 		if (!$error) {
 			# Connected OK
 			my $fh = $rv->{'fh'};
@@ -7004,7 +7104,7 @@ if ($ssl) {
 	if (!$connected) {
 		# Direct connection
 		my $error;
-		&open_socket($host, $port, $rv->{'fh'}, \$error);
+		&open_socket($host, $port, $rv->{'fh'}, \$error, $bindip);
 		return $error if ($error);
 		}
 	Net::SSLeay::set_fd($rv->{'ssl_con'}, fileno($rv->{'fh'}));
@@ -7020,7 +7120,7 @@ else {
 	    !&no_proxy($host)) {
 		# Via a proxy
 		my $error;
-		&open_socket($1, $2, $rv->{'fh'}, \$error);
+		&open_socket($1, $2, $rv->{'fh'}, \$error, $bindip);
 		if (!$error) {
 			# Connected OK
 			$connected = 1;
@@ -7044,7 +7144,7 @@ else {
 	if (!$connected) {
 		# Connecting directly
 		my $error;
-		&open_socket($host, $port, $rv->{'fh'}, \$error);
+		&open_socket($host, $port, $rv->{'fh'}, \$error, $bindip);
 		return $error if ($error);
 		my $fh = $rv->{'fh'};
 		my $rtxt = "$method $page HTTP/1.0\r\n".$htxt;
@@ -7830,7 +7930,7 @@ is un-reliable.
 sub check_clicks_function
 {
 return <<EOF;
-<script>
+<script type='text/javascript'>
 clicks = 0;
 function check_clicks(form)
 {
@@ -9368,11 +9468,25 @@ the same as the Perl construct `cat file`.
 =cut
 sub read_file_contents
 {
-&open_readfile(FILE, $_[0]) || return undef;
+my ($file) = @_;
+&open_readfile(FILE, $file) || return undef;
 local $/ = undef;
 my $rv = <FILE>;
 close(FILE);
 return $rv;
+}
+
+=head2 write_file_contents(file, data)
+
+Writes some data to the given file
+
+=cut
+sub write_file_contents
+{
+my ($file, $data) = @_;
+&open_tempfile(FILE, ">$file");
+&print_tempfile(FILE, $data);
+&close_tempfile(FILE);
 }
 
 =head2 unix_crypt(password, salt)

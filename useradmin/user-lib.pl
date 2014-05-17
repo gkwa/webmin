@@ -1560,7 +1560,7 @@ if ($config{'passwd_prog'}) {
 		$out = &backquote_command("$config{'passwd_prog'} <$temp 2>&1");
 		}
 	if ($?) {
-		return $out;
+		return $out || $text{'usave_epasswd_cmd'};
 		}
 	}
 if ($config{'passwd_mindays'} && $uinfo ne "none") {
@@ -1707,6 +1707,12 @@ if ($olduser) {
 	$ENV{'USERADMIN_OLD_HOME'} = $olduser->{'home'};
 	$ENV{'USERADMIN_OLD_GID'} = $olduser->{'gid'};
 	$ENV{'USERADMIN_OLD_PASS'} = $oldpass if (defined($oldpass));
+	}
+foreach my $f ("quota", "uquota", "mquota", "umquota") {
+	$ENV{'USERADMIN_'.uc($f)} = $user->{$f};
+	if ($olduser) {
+		$ENV{'USERADMIN_OLD_'.uc($f)} = $olduser->{$f};
+		}
 	}
 }
 
@@ -2109,11 +2115,11 @@ sub mkuid
     foreach (split(//,$_[0])) {
       ++${num_let} if ( m/[a-z]/i );
     }
-    if ( length($_[0]) ne 7 ) {
+    if ( length($_[0]) != 7 ) {
         print "ERROR: Number of characters in username $_[0] is not equal to 7\n";
         return -1;
     }
-    if ( ${num_let} ne 3 && ${num_let} ne 4 ) {
+    if ( ${num_let} != 3 && ${num_let} != 4 ) {
         print "ERROR: Number of letters in username $_[0] is not equal to 3 or 4\n";
         return -1;
     }
@@ -2123,7 +2129,7 @@ sub mkuid
     my ${icnt} = -1;
     my ${lowuid};
     ${lowuid} = ( 26 ** ( ${num_let} - 1 ) * ${lowlimit}/100 ) + ${lowlimit};
-    ${lowuid} = ${lowlimit} if ( ${num_let} eq 3 );
+    ${lowuid} = ${lowlimit} if ( ${num_let} == 3 );
     my ${base} = 26;
 
 #################################################################
@@ -2514,12 +2520,10 @@ if ($_[0]->{'noedit'}) {
 	return $dis;
 	}
 elsif ($_[0]->{'dn'}) {
-	return "<a href='edit_user.cgi?dn=".&urlize($_[0]->{'dn'})."'>".
-	       "$dis</a>";
+	return &ui_link("edit_user.cgi?dn=".&urlize($_[0]->{'dn'}), $dis);
 	}
 else {
-	return "<a href='edit_user.cgi?user=".&urlize($_[0]->{'user'})."'>".
-	       "$dis</a>";
+	return &ui_link("edit_user.cgi?user=".&urlize($_[0]->{'user'}), $dis);
 	}
 }
 
@@ -2534,12 +2538,10 @@ if ($_[0]->{'noedit'}) {
 	return &html_escape($_[0]->{'group'});
 	}
 elsif ($_[0]->{'dn'}) {
-	return "<a href='edit_group.cgi?dn=".&urlize($_[0]->{'dn'})."'>".
-	       &html_escape($_[0]->{'group'})."</a>";
+	return &ui_link("edit_group.cgi?dn=".&urlize($_[0]->{'dn'}), &html_escape($_[0]->{'group'}) );
 	}
 else {
-	return "<a href='edit_group.cgi?group=".&urlize($_[0]->{'group'})."'>".
-	       &html_escape($_[0]->{'group'})."</a>";
+	return &ui_link("edit_group.cgi?group=".&urlize($_[0]->{'group'}), &html_escape($_[0]->{'group'}) );
 	}
 }
 

@@ -64,48 +64,43 @@ if (!$config{'direct'} &&
 		}
 	if (!$in{'reset'} && ($rules || $chains)) {
 		# Offer to save the current rules
-		print &text('index_existing', $rules,
-			    "<tt>$iptables_save_file</tt>"),"<p>\n";
-		print "<form action=convert.cgi>\n";
-		print "<center><input type=submit ",
-		      "value='$text{'index_saveex'}'><p>\n";
-		if ($init_support && !$atboot) {
-			print "<input type=checkbox name=atboot value=1> ",
-			      "$text{'index_atboot'}\n";
-			}
-		print "</center></form><p>\n";
+		print &ui_confirmation_form("convert.cgi",
+			&text('index_existing', $rules,
+			      "<tt>$iptables_save_file</tt>"),
+			undef,
+			[ [ undef, $text{'index_saveex'} ] ],
+			$init_support && !$atboot ?
+			  &ui_checkbox("atboot", 1, $text{'index_atboot'}, 0) :
+			  "",
+			);
 
-		print "<table border width=100%>\n";
-		print "<tr $tb><td><b>$text{'index_headerex'}</b></td></tr>\n";
-		print "<tr $cb> <td><pre>";
-		open(OUT, "iptables-save 2>/dev/null |");
-		while(<OUT>) {
-			print &html_escape($_);
-			}
-		close(OUT);
-		print "</pre></td> </tr></table>\n";
+		print &ui_table_start($text{'index_headerex'}, "width=100%", 2);
+		$out = &backquote_command("iptables-save 2>/dev/null");
+		print &ui_table_row(undef,
+			"<pre>".&html_escape($out)."</pre>", 2);
+		print &ui_table_end();
 		}
 	else {
 		# Offer to set up a firewall
 		print &text($in{'reset'} ? 'index_rsetup' : 'index_setup',
 			    "<tt>$iptables_save_file</tt>"),"<p>\n";
-		print "<form action=setup.cgi>\n";
+		print &ui_form_start("setup.cgi");
 		print &ui_hidden("reset", $in{'reset'});
 		print "<center><table><tr><td>\n";
-		print "<input type=radio name=auto value=0 checked> ",
-		      "$text{'index_auto0'}<p>\n";
+		print &ui_oneradio("auto", 0, $text{'index_auto0'}, 1),"<p>\n";
 		foreach $a (1 .. 5) {
-			print "<input type=radio name=auto value=$a> ",
-			      "$text{'index_auto'.$a} ",
-			      &interface_choice("iface".$a),"<p>\n";
+			print &ui_oneradio("auto", $a,
+					   $text{'index_auto'.$a}, 0)." ";
+			print &interface_choice("iface".$a),"<p>\n";
 			}
 		print "</td></tr></table>\n";
-		print "<input type=submit value='$text{'index_auto'}'><p>\n";
+		print &ui_submit($text{'index_auto'}),"<p>\n";
 		if ($init_support && !$atboot) {
-			print "<input type=checkbox name=atboot value=1> ",
-			      "$text{'index_atboot'}\n";
+			print &ui_checkbox("atboot", 1,
+					   $text{'index_atboot'}, 0);
 			}
-		print "</center></form>\n";
+		print "</center>\n";
+		print &ui_form_end();
 		}
 	}
 else {
@@ -157,7 +152,7 @@ else {
 	print "<select name=table onChange='form.submit()'>\n";
 	foreach $t (@tables) {
 		if (&can_edit_table($t->{'name'})) {
-			printf "<option value=%s %s>%s\n",
+			printf "<option value=%s %s>%s</option>\n",
 			    $t->{'index'}, $t eq $table ? "selected" : "",
 			    &text('index_table_'.$t->{'name'}) || $t->{'name'};
 			}
@@ -294,7 +289,7 @@ else {
 				      &ui_submit($text{'index_policy'}),"\n";
 				print "<select name=policy>\n";
 				foreach $t ('ACCEPT','DROP','QUEUE','RETURN') {
-					printf "<option value=%s %s>%s\n",
+					printf "<option value=%s %s>%s</option>\n",
 						$t, $d eq $t ? "selected" : "",
 						$text{"index_policy_".lc($t)};
 					}
@@ -352,55 +347,39 @@ else {
 	# Display buttons for applying and un-applying the configuration,
 	# and for creating an init script if possible
 	print &ui_hr();
-	print "<table width=100%>\n";
+	print &ui_buttons_start();
 
 	if (!$config{'direct'}) {
 		if (&foreign_check("servers")) {
 			@servers = &list_cluster_servers();
 			}
 		if ($access{'apply'}) {
-			print "<tr><form action=apply.cgi>\n";
-			print &ui_hidden("table", $in{'table'});
-			print "<td><input type=submit ",
-			      "value='$text{'index_apply'}'></td>\n";
-			if (@servers) {
-				print "<td>$text{'index_applydesc2'}</td>\n";
-				}
-			else {
-				print "<td>$text{'index_applydesc'}</td>\n";
-				}
-			print "</form></tr>\n";
+			print &ui_buttons_row("apply.cgi",
+				$text{'index_apply'},
+				@servers ? $text{'index_applydesc2'}
+					 : $text{'index_applydesc'},
+				[ [ "table", $in{'table'} ] ]);
 			}
 
 		if ($access{'unapply'}) {
-			print "<tr><form action=unapply.cgi>\n";
-			print &ui_hidden("table", $in{'table'});
-			print "<td><input type=submit ",
-			      "value='$text{'index_unapply'}'></td>\n";
-			print "<td>$text{'index_unapplydesc'}</td>\n";
-			print "</form></tr>\n";
+			print &ui_buttons_row("unapply.cgi",
+				$text{'index_unapply'},
+				$text{'index_unapplydesc'},
+				[ [ "table", $in{'table'} ] ]);
 			}
 
 		if ($init_support && $access{'bootup'}) {
-			print "<tr><form action=bootup.cgi>\n";
-			print &ui_hidden("table", $in{'table'});
-			print "<td nowrap><input type=submit ",
-			      "value='$text{'index_bootup'}'>\n";
-			printf "<input type=radio name=boot value=1 %s> %s\n",
-				$atboot ? "checked" : "", $text{'yes'};
-			printf "<input type=radio name=boot value=0 %s> %s\n",
-				$atboot ? "" : "checked", $text{'no'};
-			print "</td> <td>$text{'index_bootupdesc'}</td>\n";
-			print "</form></tr>\n";
+			print &ui_buttons_row("bootup.cgi",
+				$text{'index_bootup'},
+				$text{'index_bootupdesc'},
+				[ [ "table", $in{'table'} ] ],
+				&ui_yesno_radio("boot", $atboot));
 			}
 
 		if ($access{'setup'}) {
-			print "<tr><form action=index.cgi>\n";
-			print "<input type=hidden name=reset value=1>\n";
-			print "<td><input type=submit ",
-			      "value='$text{'index_reset'}'></td>\n";
-			print "<td>$text{'index_resetdesc'}</td>\n";
-			print "</form></tr>\n";
+			print &ui_buttons_row("index.cgi",
+				$text{'index_reset'}, $text{'index_resetdesc'},
+				[ [ "reset", 1 ] ]);
 			}
 		}
 
@@ -411,14 +390,12 @@ else {
 				&servers::list_servers();
 		}
 	if ($access{'cluster'} && @allservers) {
-		print "<tr><form action=cluster.cgi>\n";
-		print "<td><input type=submit ",
-		      "value='$text{'index_cluster'}'></td>\n";
-		print "<td>$text{'index_clusterdesc'}</td>\n";
-		print "</form></tr>\n";
+		print &ui_buttons_row(
+			"cluster.cgi", $text{'index_cluster'},
+			$text{'index_clusterdesc'});
 		}
 
-	print "</table>\n";
+	print &ui_buttons_end();
 	}
 
 &ui_print_footer("/", $text{'index'});

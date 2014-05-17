@@ -69,7 +69,7 @@ $rv = [	[ 'AccessFileName', 0, 5, 'virtual', undef, 5 ],
 	[ 'StartServers', 0, 0, 'global', -2.0 ],
 	[ 'MinSpareServers', 0, 0, 'global', -2.0 ],
 	[ 'MaxSpareServers', 0, 0, 'global', -2.0 ],
-	[ 'NameVirtualHost', 1, 1, 'global', 1.3, 5 ],
+	[ 'NameVirtualHost', 1, 1, 'global', '1.3-2.4', 5 ],
 	[ 'Options', 0, 5, 'virtual directory htaccess', undef, 3 ],
 	[ 'PidFile', 0, 9, 'global', -2.0 ],
 	[ 'require', 0, 4, 'directory htaccess', undef, 6 ],
@@ -573,7 +573,8 @@ local(@nv, $nv, $addr);
 @nv = split(/\s+/, $in{'NameVirtualHost'});
 @nv = ( "*", @nv ) if ($in{'NameVirtualHost_star'});
 foreach $nv (@nv) {
-	if ($nv =~ /^(\S+):(\d+|\*)$/) { $addr = $1; }
+	if ($nv =~ /^\[(\S+)\]:(\d+|\*)$/) { $addr = $1; }
+	elsif ($nv =~ /^(\S+):(\d+|\*)$/) { $addr = $1; }
 	else { $addr = $nv; }
 	if (!&to_ipaddress($addr) &&
 	    !&to_ip6address($addr) && $addr ne '*') {
@@ -881,7 +882,7 @@ sub edit_AuthType
 local($rv, $a);
 $rv = "<select name=AuthType>\n";
 foreach $a ("", "Basic", "Digest") {
-	$rv .= sprintf "<option %s>$a\n",
+	$rv .= sprintf "<option %s>$a</option>\n",
 	        lc($_[0]->{'value'}) eq lc($a) ? "selected" : "";
 	}
 $rv .= "</select>";

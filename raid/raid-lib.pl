@@ -9,6 +9,7 @@ use WebminCore;
 open(MODE, "$module_config_directory/mode");
 chop($raid_mode = <MODE>);
 close(MODE);
+$raid_mode ||= "mdadm";
 
 %container = ( 'raiddev', 1,
 	       'device', 1 );
@@ -147,7 +148,7 @@ else {
 			elsif (/^\s*State\s*:\s*(.*)/) {
 				$md->{'state'} = $1;
 				}
-			elsif ((/^\s*Rebuild\s+Status\s*:\s*(\d+)\s*\%/) || (/^\s*Reshape\s+Status\s*:\s*(\d+)\s*\%/)) {
+			elsif ((/^\s*Rebuild\s+Status\s*:\s*([0-9\.]+)\s*\%/) || (/^\s*Reshape\s+Status\s*:\s*(\d+)\s*\%/)) {
 				$md->{'rebuild'} = $1;
 				}
 			elsif (/^\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+|\-)\s+(.*\S)\s+(\/\S+)/) {
@@ -358,11 +359,12 @@ else {
 			push(@parities, $d->{'value'});
 			}
 		}
-	local $cmd = "mdadm --$mode --level $lvl --chunk $chunk";
+	local $cmd = "mdadm --$mode --level $lvl";
 	if ($_[2]) {
 		push(@devices, "missing");
 		}
 	$cmd .= " --layout $layout" if ($layout);
+	$cmd .= " --chunk $chunk" if ($chunk);
 	$cmd .= " --raid-devices ".scalar(@devices);
 	$cmd .= " --spare-devices ".scalar(@spares) if (@spares);
 	$cmd .= " --force" if ($_[1]);
